@@ -1,3 +1,5 @@
+This repository a fork of: https://github.com/yongkyung-oh/Multi-View_Contrastive_Learning/tree/main
+
 # [Multi-View Contrastive Learning for Robust Domain Adaptation in Medical Time Series Analysis](https://arxiv.org/abs/2506.22393)
 
 YongKyung Oh and Alex Bui. Multi-View Contrastive Learning for Robust Domain Adaptation in Medical Time Series Analysis. Proceedings of the sixth Conference on Health, Inference, and Learning (CHIL 2025), volume 287, pages 502–526, Proceedings of Machine Learning Research, 2025. PMLR, **Models & Methods Track - Best Paper Award**, [https://proceedings.mlr.press/v287/oh25a.html](https://proceedings.mlr.press/v287/oh25a.html)
