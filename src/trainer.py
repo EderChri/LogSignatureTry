@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.cuda.amp import autocast, GradScaler
+from torch.amp import autocast, GradScaler
 from pytorch_metric_learning import losses
 from tqdm import tqdm
 
@@ -56,7 +56,7 @@ def train(args, encoder, clf, encoder_optimizer, clf_optimizer, loader, mode='pr
                 param.requires_grad = False
         clf.train()
     
-    scaler = GradScaler()
+    scaler = GradScaler("cuda")
     
     info_loss = losses.NTXentLoss(temperature=args.temperature)
     info_criterion = losses.SelfSupervisedLoss(info_loss, symmetric=True)
@@ -74,7 +74,7 @@ def train(args, encoder, clf, encoder_optimizer, clf_optimizer, loader, mode='pr
         if mode != 'pretrain':
             clf_optimizer.zero_grad()
         
-        with autocast(enabled=True):
+        with autocast("cuda", enabled=True):
             ht, hd, hf, zt, zd, zf = encoder(xt, dx, xf)
             ht_aug, hd_aug, hf_aug, zt_aug, zd_aug, zf_aug = encoder(xt_aug, dx_aug, xf_aug)
             
@@ -146,7 +146,7 @@ def test(args, encoder, clf, loader, mode='pretrain', device='cuda'):
         for batch in pbar:      
             xt, dx, xf, xt_aug, dx_aug, xf_aug, y = [t.float().to(device) for t in batch]
 
-            with autocast(enabled=True):
+            with autocast("cuda", enabled=True):
                 ht, hd, hf, zt, zd, zf = encoder(xt, dx, xf)
                 ht_aug, hd_aug, hf_aug, zt_aug, zd_aug, zf_aug = encoder(xt_aug, dx_aug, xf_aug)
                 
@@ -190,32 +190,34 @@ def remove_module_prefix(state_dict):
     return new_state_dict
 
 
-def load_encoder(encoder, checkpoint_path, new_num_feature=None):
+def load_encoder(encoder, checkpoint_path, new_num_features=None):
+    """Load a pretrained encoder, re-initialising input layers when feature dims differ.
+
+    Args:
+        new_num_features: dict mapping layer name to expected input feature count,
+                          e.g. {'input_layer_t': 6, 'input_layer_d': 21, 'input_layer_f': 6}.
+                          Layers whose stored dim differs from the expected dim are
+                          re-initialised with Xavier-uniform weights.
+                          Pass None to skip dimension checking entirely.
+    """
     # Load the state dict
     state_dict = torch.load(checkpoint_path, map_location='cpu')
-    
+
     # If it's a full checkpoint (not just the state_dict), extract the encoder_state_dict
     if isinstance(state_dict, dict) and 'encoder_state_dict' in state_dict:
         state_dict = state_dict['encoder_state_dict']
-    
+
     # Remove the 'module.' prefix from multi-GPU training, if present
     state_dict = remove_module_prefix(state_dict)
 
-    # If new_num_feature is specified and different from the loaded weights
-    if new_num_feature is not None:
-        input_layers = ['input_layer_t', 'input_layer_d', 'input_layer_f']
-        for layer_name in input_layers:
-            # Get old weights and biases
+    # Re-initialise input layers whose feature dimension has changed
+    if new_num_features is not None:
+        for layer_name, new_dim in new_num_features.items():
             old_weight = state_dict[f'{layer_name}.weight']
             old_bias = state_dict[f'{layer_name}.bias']
-            old_num_feature = old_weight.size(1)
-            
-            if new_num_feature != old_num_feature:
-                # Initialize new weights with correct dimensions
-                new_weight = nn.Linear(new_num_feature, old_weight.size(0)).weight.data
+            if new_dim != old_weight.size(1):
+                new_weight = nn.Linear(new_dim, old_weight.size(0)).weight.data
                 nn.init.xavier_uniform_(new_weight)
-                
-                # Replace weights and biases in the state_dict
                 state_dict[f'{layer_name}.weight'] = new_weight
                 state_dict[f'{layer_name}.bias'] = torch.zeros_like(old_bias)
     

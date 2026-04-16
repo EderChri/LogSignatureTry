@@ -88,22 +88,24 @@ if args.full_training:
     args.data_name = '-'.join([args.data_name, 'full'])
 
 ##
-preprocessed_data = preprocess_data(X_train_intp, X_test_intp)
-X_train_intp_xt, X_test_intp_xt, _, _ = preprocessed_data['xt']
-X_train_intp_dx, X_test_intp_dx, _, _ = preprocessed_data['dx']
-X_train_intp_xf, X_test_intp_xf, _, _ = preprocessed_data['xf']
+views = ('xt', args.view2, args.view3)
 
-preprocessed_data = preprocess_data(X_train_aug, X_test_aug)
-X_train_aug_xt, X_test_aug_xt, _, _ = preprocessed_data['xt']
-X_train_aug_dx, X_test_aug_dx, _, _ = preprocessed_data['dx']
-X_train_aug_xf, X_test_aug_xf, _, _ = preprocessed_data['xf']
+preprocessed_data = preprocess_data(X_train_intp, X_test_intp, views=views, logsig_depth=args.logsig_depth)
+X_train_intp_v1, X_test_intp_v1, _, _ = preprocessed_data['v1']
+X_train_intp_v2, X_test_intp_v2, _, _ = preprocessed_data['v2']
+X_train_intp_v3, X_test_intp_v3, _, _ = preprocessed_data['v3']
 
-X_train = [X_train_intp_xt, X_train_intp_dx, X_train_intp_xf]
-X_train_aug = [X_train_aug_xt, X_train_aug_dx, X_train_aug_xf]
+preprocessed_data = preprocess_data(X_train_aug, X_test_aug, views=views, logsig_depth=args.logsig_depth)
+X_train_aug_v1, X_test_aug_v1, _, _ = preprocessed_data['v1']
+X_train_aug_v2, X_test_aug_v2, _, _ = preprocessed_data['v2']
+X_train_aug_v3, X_test_aug_v3, _, _ = preprocessed_data['v3']
+
+X_train = [X_train_intp_v1, X_train_intp_v2, X_train_intp_v3]
+X_train_aug = [X_train_aug_v1, X_train_aug_v2, X_train_aug_v3]
 
 ##
-pretrain_dataset = Load_Dataset(X_train, X_train_aug, y_train, 'pretrain')
-prevalid_dataset = Load_Dataset(X_train, X_train_aug, y_train, 'prevalid')
+pretrain_dataset = Load_Dataset(X_train, X_train_aug, y_train, 'pretrain', views=views)
+prevalid_dataset = Load_Dataset(X_train, X_train_aug, y_train, 'prevalid', views=views)
 pretrain_loader = DataLoader(pretrain_dataset, batch_size=args.batch_size_pretrain, shuffle=True, drop_last=False)
 prevalid_loader = DataLoader(prevalid_dataset, batch_size=args.batch_size_pretrain, shuffle=False, drop_last=False)
 
@@ -118,13 +120,16 @@ os.makedirs(f'out_pretrain/{args.data_name}', exist_ok=True)
 if args.num_feature > 64:
     args.num_feature = 64
 
+args.num_feature_v2 = get_view_num_features(args.view2, args.num_feature, args.logsig_depth)
+args.num_feature_v3 = get_view_num_features(args.view3, args.num_feature, args.logsig_depth)
+
 if torch.cuda.device_count() > 1:
     encoder = Encoder(args)
     encoder = nn.DataParallel(encoder).to(device)
 else:
     encoder = Encoder(args).to(device)
 encoder_optimizer = torch.optim.Adam(encoder.parameters(), lr=args.lr, weight_decay=args.weight_decay)
-scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(encoder_optimizer, mode='min', factor=0.5, patience=10, verbose=False)
+scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(encoder_optimizer, mode='min', factor=0.5, patience=10)
 
 loss_list = []
 best_valid_loss = float('inf')

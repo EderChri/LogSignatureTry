@@ -32,7 +32,19 @@ def get_args_parser():
     parser.add_argument('--temperature', default=0.07, type=float)
     parser.add_argument('--lam', default=0.0, type=float)
     parser.add_argument('--partial', default=1.0, type=float)
-    
+
+    # Cross-dataset transfer: pretrain on one dataset, finetune on another
+    parser.add_argument('--pretrain_data_name', default=None, type=str,
+                        help='data_name of the pretrained model; defaults to --data_name')
+
+    # View configuration (view1 is always 'xt')
+    parser.add_argument('--view2', default='dx', type=str,
+                        help="Second view: 'dx', 'xf', or 'logsig'")
+    parser.add_argument('--view3', default='xf', type=str,
+                        help="Third view: 'dx', 'xf', or 'logsig'")
+    parser.add_argument('--logsig_depth', default=2, type=int,
+                        help='Depth for log signature computation')
+
     return parser
 
 

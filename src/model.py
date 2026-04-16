@@ -60,11 +60,11 @@ class Encoder(nn.Module):
         self.encoder_layers_t = nn.TransformerEncoderLayer(d_model=args.num_embedding, dim_feedforward=args.num_hidden, nhead=args.num_head, dropout=args.dropout, batch_first=True)
         self.transformer_encoder_t = nn.TransformerEncoder(self.encoder_layers_t, args.num_layers)        
 
-        self.input_layer_d = nn.Linear(args.num_feature, args.num_embedding)
+        self.input_layer_d = nn.Linear(getattr(args, 'num_feature_v2', args.num_feature), args.num_embedding)
         self.encoder_layers_d = nn.TransformerEncoderLayer(d_model=args.num_embedding, dim_feedforward=args.num_hidden, nhead=args.num_head, dropout=args.dropout, batch_first=True)
         self.transformer_encoder_d = nn.TransformerEncoder(self.encoder_layers_d, args.num_layers)
 
-        self.input_layer_f = nn.Linear(args.num_feature, args.num_embedding)
+        self.input_layer_f = nn.Linear(getattr(args, 'num_feature_v3', args.num_feature), args.num_embedding)
         self.encoder_layers_f = nn.TransformerEncoderLayer(d_model=args.num_embedding, dim_feedforward=args.num_hidden, nhead=args.num_head, dropout=args.dropout, batch_first=True)
         self.transformer_encoder_f = nn.TransformerEncoder(self.encoder_layers_f, args.num_layers)
 

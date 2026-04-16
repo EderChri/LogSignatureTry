@@ -45,6 +45,9 @@ def seed_everything(seed):
 args = parse_args()
 seed_everything(args.seed)
 
+# Resolve pretrained model source dataset (defaults to the finetune dataset)
+if args.pretrain_data_name is None:
+    args.pretrain_data_name = args.data_name
 
 #
 if str(args.loss_type) not in ['ALL', 'TDF'] and float(args.lam) == 0.0:
@@ -81,24 +84,26 @@ X_test_intp = torch.tensor(X_test_intp).transpose(1,2)
 X_test_aug = torch.tensor(X_test_aug).transpose(1,2)
 y_test = torch.tensor(y_test)
 
-## 
-preprocessed_data = preprocess_data(X_train_intp, X_val_intp)
-X_train_intp_xt, X_val_intp_xt, _, _ = preprocessed_data['xt']
-X_train_intp_dx, X_val_intp_dx, _, _ = preprocessed_data['dx']
-X_train_intp_xf, X_val_intp_xf, _, _ = preprocessed_data['xf']
+##
+views = ('xt', args.view2, args.view3)
 
-preprocessed_data = preprocess_data(X_train_intp, X_test_intp)
-X_train_intp_xt, X_test_intp_xt, _, _ = preprocessed_data['xt']
-X_train_intp_dx, X_test_intp_dx, _, _ = preprocessed_data['dx']
-X_train_intp_xf, X_test_intp_xf, _, _ = preprocessed_data['xf']
+preprocessed_data = preprocess_data(X_train_intp, X_val_intp, views=views, logsig_depth=args.logsig_depth)
+X_train_intp_v1, X_val_intp_v1, _, _ = preprocessed_data['v1']
+X_train_intp_v2, X_val_intp_v2, _, _ = preprocessed_data['v2']
+X_train_intp_v3, X_val_intp_v3, _, _ = preprocessed_data['v3']
 
-X_train = [X_train_intp_xt, X_train_intp_dx, X_train_intp_xf]
-X_valid = [X_val_intp_xt, X_val_intp_dx, X_val_intp_xf]
-X_test = [X_test_intp_xt, X_test_intp_dx, X_test_intp_xf]
+preprocessed_data = preprocess_data(X_train_intp, X_test_intp, views=views, logsig_depth=args.logsig_depth)
+X_train_intp_v1, X_test_intp_v1, _, _ = preprocessed_data['v1']
+X_train_intp_v2, X_test_intp_v2, _, _ = preprocessed_data['v2']
+X_train_intp_v3, X_test_intp_v3, _, _ = preprocessed_data['v3']
 
-train_dataset = Load_Dataset(X_train, X_train, y_train, 'finetune')
-valid_dataset = Load_Dataset(X_valid, X_valid, y_val, 'test')
-test_dataset = Load_Dataset(X_test, X_test, y_test, 'test')
+X_train = [X_train_intp_v1, X_train_intp_v2, X_train_intp_v3]
+X_valid = [X_val_intp_v1, X_val_intp_v2, X_val_intp_v3]
+X_test = [X_test_intp_v1, X_test_intp_v2, X_test_intp_v3]
+
+train_dataset = Load_Dataset(X_train, X_train, y_train, 'finetune', views=views)
+valid_dataset = Load_Dataset(X_valid, X_valid, y_val, 'test', views=views)
+test_dataset = Load_Dataset(X_test, X_test, y_test, 'test', views=views)
 train_loader = DataLoader(train_dataset, batch_size=args.batch_size_finetune, shuffle=True, drop_last=False)
 valid_loader = DataLoader(valid_dataset, batch_size=args.batch_size_finetune, shuffle=False, drop_last=False)
 test_loader = DataLoader(test_dataset, batch_size=args.batch_size_finetune, shuffle=False, drop_last=False)
@@ -110,6 +115,9 @@ os.makedirs(f'out_finetune/{args.data_name}', exist_ok=True)
 # Dimension reduction with PCA
 if args.num_feature > 64:
     args.num_feature = 64
+
+args.num_feature_v2 = get_view_num_features(args.view2, args.num_feature, args.logsig_depth)
+args.num_feature_v3 = get_view_num_features(args.view3, args.num_feature, args.logsig_depth)
 
 ##
 if len(args.loss_type) == 3:
@@ -123,10 +131,14 @@ monitoring_metric = 'accuracy'
 print(args)
 for k in range(K):
     ## Run -- finetune
-    best_model_path = f'model_pretrain/{args.data_name}/{args.data_name}_{args.seed}.pth'
+    best_model_path = f'model_pretrain/{args.pretrain_data_name}/{args.pretrain_data_name}_{args.seed}.pth'
     if torch.cuda.device_count() > 1:
         encoder = Encoder(args)
-        encoder = load_encoder(encoder, best_model_path, args.num_feature)
+        encoder = load_encoder(encoder, best_model_path, {
+                'input_layer_t': args.num_feature,
+                'input_layer_d': args.num_feature_v2,
+                'input_layer_f': args.num_feature_v3,
+            })
         encoder = nn.DataParallel(encoder).to(device)
         clf = Classifier(args)
         clf = nn.DataParallel(clf).to(device)
@@ -202,10 +214,14 @@ for k in range(K):
         
 
     ## Run -- freeze
-    best_model_path = f'model_pretrain/{args.data_name}/{args.data_name}_{args.seed}.pth'
+    best_model_path = f'model_pretrain/{args.pretrain_data_name}/{args.pretrain_data_name}_{args.seed}.pth'
     if torch.cuda.device_count() > 1:
         encoder = Encoder(args)
-        encoder = load_encoder(encoder, best_model_path, args.num_feature)
+        encoder = load_encoder(encoder, best_model_path, {
+                'input_layer_t': args.num_feature,
+                'input_layer_d': args.num_feature_v2,
+                'input_layer_f': args.num_feature_v3,
+            })
         encoder = nn.DataParallel(encoder).to(device)
         clf = Classifier(args)
         clf = nn.DataParallel(clf).to(device)
