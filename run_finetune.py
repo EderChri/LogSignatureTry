@@ -31,6 +31,15 @@ use_cuda = torch.cuda.is_available()
 device = torch.device("cuda" if use_cuda else "cpu")
 
 
+def write_final_metric_row(summary_path, run_name, final_test_score, epochs_trained):
+    if not os.path.exists(summary_path):
+        with open(summary_path, 'w') as f:
+            f.write('run_name\tfinal_test_score\tepochs_trained\n')
+
+    with open(summary_path, 'a') as f:
+        f.write(f'{run_name}\t{final_test_score:.6f}\t{epochs_trained}\n')
+
+
 def seed_everything(seed):
     os.environ['PYTHONHASHSEED'] = str(seed)
     np.random.seed(seed)
@@ -111,6 +120,7 @@ test_loader = DataLoader(test_dataset, batch_size=args.batch_size_finetune, shuf
 ##
 os.makedirs(f'out_finetune', exist_ok=True)
 os.makedirs(f'out_finetune/{args.data_name}', exist_ok=True)
+summary_file = f'out_finetune/{args.data_name}/final_test_metric_summary.tsv'
 
 # Dimension reduction with PCA
 if args.num_feature > 64:
@@ -118,6 +128,9 @@ if args.num_feature > 64:
 
 args.num_feature_v2 = get_view_num_features(args.view2, args.num_feature, args.logsig_depth)
 args.num_feature_v3 = get_view_num_features(args.view3, args.num_feature, args.logsig_depth)
+
+pretrain_tag = f'{args.pretrain_data_name}_v2{args.view2}_v3{args.view3}_ep{args.epochs_pretrain}_{args.seed}'
+best_model_path = f'model_pretrain/{args.pretrain_data_name}/{pretrain_tag}.pth'
 
 ##
 if len(args.loss_type) == 3:
@@ -131,7 +144,10 @@ monitoring_metric = 'accuracy'
 print(args)
 for k in range(K):
     ## Run -- finetune
-    best_model_path = f'model_pretrain/{args.pretrain_data_name}/{args.pretrain_data_name}_{args.seed}.pth'
+    if not os.path.exists(best_model_path):
+        print(f"Pretrained checkpoint not found: {best_model_path}. Skipping this run.")
+        continue
+
     if torch.cuda.device_count() > 1:
         encoder = Encoder(args)
         encoder = load_encoder(encoder, best_model_path, {
@@ -143,7 +159,13 @@ for k in range(K):
         clf = Classifier(args)
         clf = nn.DataParallel(clf).to(device)
     else:
-        encoder = Encoder(args).to(device)
+        encoder = Encoder(args)
+        encoder = load_encoder(encoder, best_model_path, {
+                'input_layer_t': args.num_feature,
+                'input_layer_d': args.num_feature_v2,
+                'input_layer_f': args.num_feature_v3,
+            })
+        encoder = encoder.to(device)
         clf = Classifier(args).to(device)
     
     for param in encoder.parameters():
@@ -151,14 +173,14 @@ for k in range(K):
     
     encoder_optimizer = torch.optim.Adam(encoder.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     clf_optimizer = torch.optim.Adam(clf.parameters(), lr=args.lr, weight_decay=args.weight_decay)
-    encoder_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(encoder_optimizer, mode='max', factor=0.5, patience=10, verbose=False)
-    clf_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(clf_optimizer, mode='max', factor=0.5, patience=10, verbose=False)
+    encoder_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(encoder_optimizer, mode='max', factor=0.5, patience=10)
+    clf_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(clf_optimizer, mode='max', factor=0.5, patience=10)
     
     loss_list = []
     metric_list = []
     best_valid_mm = 0
     best_valid_loss = float('inf')
-    output_file = f'out_finetune/{args.data_name}/{args.data_name}_{args.seed}_{args.feature}_{args.loss_type}_{args.lam}_{k}_finetune'
+    output_file = f'out_finetune/{args.data_name}/{args.data_name}_pt-{pretrain_tag}_{args.feature}_{args.loss_type}_{args.lam}_{k}_finetune'
     
     # Early stopping parameters
     patience = 20
@@ -168,6 +190,8 @@ for k in range(K):
     if os.path.exists(output_file):
         print(f"Output file {output_file} already exists. Skipping this run.")
     else:
+        final_test_mm = None
+        epochs_trained = 0
         # Run experiment
         for epoch in range(1, args.epochs_finetune + 1):
             train_loss, train_loss_c = train(args, encoder, clf, encoder_optimizer, clf_optimizer, train_loader, mode='finetune', device=device)
@@ -189,6 +213,8 @@ for k in range(K):
             
             print(f'Epoch {epoch}: Train Metric = {train_mm:.4f}, Validation Metric = {valid_mm:.4f}, Test Metric = {test_mm:.4f}')
             metric_list.append([train_metric, valid_metric, test_metric])
+            final_test_mm = test_mm
+            epochs_trained = epoch
             
             # Learning rate scheduling
             encoder_scheduler.step(valid_mm)
@@ -211,10 +237,14 @@ for k in range(K):
         os.makedirs(os.path.dirname(output_file), exist_ok=True)
         with open(output_file, 'wb') as f:
             pickle.dump([args, loss_list, metric_list], f)
+
+        if final_test_mm is not None:
+            run_name = os.path.basename(output_file)
+            write_final_metric_row(summary_file, run_name, final_test_mm, epochs_trained)
+            print(f'Final summary written: {run_name}, score={final_test_mm:.4f}, epochs={epochs_trained}')
         
 
     ## Run -- freeze
-    best_model_path = f'model_pretrain/{args.pretrain_data_name}/{args.pretrain_data_name}_{args.seed}.pth'
     if torch.cuda.device_count() > 1:
         encoder = Encoder(args)
         encoder = load_encoder(encoder, best_model_path, {
@@ -226,7 +256,13 @@ for k in range(K):
         clf = Classifier(args)
         clf = nn.DataParallel(clf).to(device)
     else:
-        encoder = Encoder(args).to(device)
+        encoder = Encoder(args)
+        encoder = load_encoder(encoder, best_model_path, {
+                'input_layer_t': args.num_feature,
+                'input_layer_d': args.num_feature_v2,
+                'input_layer_f': args.num_feature_v3,
+            })
+        encoder = encoder.to(device)
         clf = Classifier(args).to(device)
     
     for name, param in encoder.named_parameters():
@@ -237,14 +273,14 @@ for k in range(K):
     
     encoder_optimizer = torch.optim.Adam(encoder.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     clf_optimizer = torch.optim.Adam(clf.parameters(), lr=args.lr, weight_decay=args.weight_decay)
-    encoder_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(encoder_optimizer, mode='max', factor=0.5, patience=10, verbose=False)
-    clf_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(clf_optimizer, mode='max', factor=0.5, patience=10, verbose=False)
+    encoder_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(encoder_optimizer, mode='max', factor=0.5, patience=10)
+    clf_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(clf_optimizer, mode='max', factor=0.5, patience=10)
     
     loss_list = []
     metric_list = []
     best_valid_mm = 0
     best_valid_loss = float('inf')
-    output_file = f'out_finetune/{args.data_name}/{args.data_name}_{args.seed}_{args.feature}_{args.loss_type}_{args.lam}_{k}_freeze'
+    output_file = f'out_finetune/{args.data_name}/{args.data_name}_pt-{pretrain_tag}_{args.feature}_{args.loss_type}_{args.lam}_{k}_freeze'
     
     # Early stopping parameters
     patience = 20
@@ -254,6 +290,8 @@ for k in range(K):
     if os.path.exists(output_file):
         print(f"Output file {output_file} already exists. Skipping this run.")
     else:
+        final_test_mm = None
+        epochs_trained = 0
         # Run experiment
         for epoch in range(1, args.epochs_finetune + 1):
             train_loss, train_loss_c = train(args, encoder, clf, encoder_optimizer, clf_optimizer, train_loader, mode='freeze', device=device)
@@ -275,6 +313,8 @@ for k in range(K):
             
             print(f'Epoch {epoch}: Train Metric = {train_mm:.4f}, Validation Metric = {valid_mm:.4f}, Test Metric = {test_mm:.4f}')
             metric_list.append([train_metric, valid_metric, test_metric])
+            final_test_mm = test_mm
+            epochs_trained = epoch
             
             # Learning rate scheduling
             encoder_scheduler.step(valid_mm)
@@ -297,6 +337,11 @@ for k in range(K):
         os.makedirs(os.path.dirname(output_file), exist_ok=True)
         with open(output_file, 'wb') as f:
             pickle.dump([args, loss_list, metric_list], f)
+
+        if final_test_mm is not None:
+            run_name = os.path.basename(output_file)
+            write_final_metric_row(summary_file, run_name, final_test_mm, epochs_trained)
+            print(f'Final summary written: {run_name}, score={final_test_mm:.4f}, epochs={epochs_trained}')
         
 
     ## Run -- finetune -- baseline
@@ -311,15 +356,15 @@ for k in range(K):
     
     encoder_optimizer = torch.optim.Adam(encoder.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     clf_optimizer = torch.optim.Adam(clf.parameters(), lr=args.lr, weight_decay=args.weight_decay)
-    encoder_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(encoder_optimizer, mode='max', factor=0.5, patience=10, verbose=False)
-    clf_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(clf_optimizer, mode='max', factor=0.5, patience=10, verbose=False)
+    encoder_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(encoder_optimizer, mode='max', factor=0.5, patience=10)
+    clf_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(clf_optimizer, mode='max', factor=0.5, patience=10)
     
     loss_list = []
     metric_list = []
     best_valid_mm = 0
     best_valid_loss = float('inf')
     # best_model_path = f'model_finetune/{args.data_name}/{args.data_name}_{args.seed}_{args.feature}_{args.loss_type}_{args.lam}_{k}_baseline.pth'
-    output_file = f'out_finetune/{args.data_name}/{args.data_name}_{args.seed}_{args.feature}_{args.loss_type}_{args.lam}_{k}_baseline'
+    output_file = f'out_finetune/{args.data_name}/{args.data_name}_pt-{pretrain_tag}_{args.feature}_{args.loss_type}_{args.lam}_{k}_baseline'
     
     # Early stopping parameters
     patience = 20
@@ -329,6 +374,8 @@ for k in range(K):
     if os.path.exists(output_file):
         print(f"Output file {output_file} already exists. Skipping this run.")
     else:
+        final_test_mm = None
+        epochs_trained = 0
         # Run experiment
         for epoch in range(1, args.epochs_finetune + 1):
             train_loss, train_loss_c = train(args, encoder, clf, encoder_optimizer, clf_optimizer, train_loader, mode='baseline', device=device)
@@ -350,6 +397,8 @@ for k in range(K):
             
             print(f'Epoch {epoch}: Train Metric = {train_mm:.4f}, Validation Metric = {valid_mm:.4f}, Test Metric = {test_mm:.4f}')
             metric_list.append([train_metric, valid_metric, test_metric])
+            final_test_mm = test_mm
+            epochs_trained = epoch
             
             # Learning rate scheduling
             encoder_scheduler.step(valid_mm)
@@ -372,3 +421,8 @@ for k in range(K):
         os.makedirs(os.path.dirname(output_file), exist_ok=True)
         with open(output_file, 'wb') as f:
             pickle.dump([args, loss_list, metric_list], f)
+
+        if final_test_mm is not None:
+            run_name = os.path.basename(output_file)
+            write_final_metric_row(summary_file, run_name, final_test_mm, epochs_trained)
+            print(f'Final summary written: {run_name}, score={final_test_mm:.4f}, epochs={epochs_trained}')

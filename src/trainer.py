@@ -1,9 +1,14 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import os
 from torch.amp import autocast, GradScaler
 from pytorch_metric_learning import losses
 from tqdm import tqdm
+
+
+def _tqdm_disabled() -> bool:
+    return os.environ.get('TQDM_DISABLE', '0').strip().lower() in {'1', 'true', 'yes', 'on'}
 
 
 def add_weight_regularization(model, l1_scale=0.0, l2_scale=0.01):
@@ -66,7 +71,7 @@ def train(args, encoder, clf, encoder_optimizer, clf_optimizer, loader, mode='pr
     total_loss_c = 0
     total_samples = 0
     
-    pbar = tqdm(loader, desc=f"Training ({mode})")
+    pbar = tqdm(loader, desc=f"Training ({mode})", disable=_tqdm_disabled())
     for batch in pbar:      
         xt, dx, xf, xt_aug, dx_aug, xf_aug, y = [t.float().to(device) for t in batch]
         
@@ -142,7 +147,7 @@ def test(args, encoder, clf, loader, mode='pretrain', device='cuda'):
     total_samples = 0
     
     with torch.no_grad():
-        pbar = tqdm(loader, desc=f"Testing ({mode})")
+        pbar = tqdm(loader, desc=f"Testing ({mode})", disable=_tqdm_disabled())
         for batch in pbar:      
             xt, dx, xf, xt_aug, dx_aug, xf_aug, y = [t.float().to(device) for t in batch]
 
@@ -200,8 +205,14 @@ def load_encoder(encoder, checkpoint_path, new_num_features=None):
                           re-initialised with Xavier-uniform weights.
                           Pass None to skip dimension checking entirely.
     """
-    # Load the state dict
-    state_dict = torch.load(checkpoint_path, map_location='cpu')
+    # Load trusted local checkpoints across PyTorch versions.
+    # PyTorch >=2.6 defaults to weights_only=True, which cannot load
+    # checkpoints containing argparse.Namespace in metadata.
+    try:
+        state_dict = torch.load(checkpoint_path, map_location='cpu', weights_only=False)
+    except TypeError:
+        # Older PyTorch versions may not support weights_only.
+        state_dict = torch.load(checkpoint_path, map_location='cpu')
 
     # If it's a full checkpoint (not just the state_dict), extract the encoder_state_dict
     if isinstance(state_dict, dict) and 'encoder_state_dict' in state_dict:

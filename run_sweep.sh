@@ -15,12 +15,16 @@ NUM_TARGET=5
 
 # --- Sweep axes ---------------------------------------------------------------
 SEEDS=(0)                           # add more seeds: (0 1 2)
-EPOCHS=(200)                        # add more epoch counts: (100 200)
+EPOCHS=(200 2)                        # add more epoch counts: (100 200)
 VIEW2S=("dx" "logsig")              # second view per combination
 VIEW3S=("xf" "xf")                  # third view per combination (must match length of VIEW2S)
 
 # --- Misc ---------------------------------------------------------------------
 PARALLEL=false                      # set to true to run jobs on separate GPUs in background
+DEFAULT_BATCH_SIZE=64
+LOGSIG_BATCH_SIZE=8
+DISABLE_TQDM=0
+SKIP_TAGS=("_DA_SleepEEG_256_00_v2dx_v3xf_ep200_seed0")  # finished runs to skip
 # =============================================================================
 
 mkdir -p logs
@@ -41,22 +45,42 @@ for EPOCHS_VAL in "${EPOCHS[@]}"; do
       TAG="${DATA}_v2${V2}_v3${V3}_ep${EPOCHS_VAL}_seed${SEED}"
       LOG="logs/${TAG}.log"
 
-      CMD="python run_pretrain.py \
+      should_skip=false
+      for SKIP_TAG in "${SKIP_TAGS[@]}"; do
+        if [ "$TAG" = "$SKIP_TAG" ]; then
+          should_skip=true
+          break
+        fi
+      done
+
+      if [ "$should_skip" = true ]; then
+        echo "Skipping: ${TAG}"
+        job_index=$((job_index + 1))
+        continue
+      fi
+
+      BATCH_SIZE=${DEFAULT_BATCH_SIZE}
+      if [ "$V2" = "logsig" ] || [ "$V3" = "logsig" ]; then
+        BATCH_SIZE=${LOGSIG_BATCH_SIZE}
+      fi
+
+      CMD="python -u run_pretrain.py \
         --data_name ${DATA} \
         --num_feature ${NUM_FEATURE} \
         --num_target ${NUM_TARGET} \
         --view2 ${V2} \
         --view3 ${V3} \
+        --batch_size_pretrain ${BATCH_SIZE} \
         --epochs_pretrain ${EPOCHS_VAL} \
         --seed ${SEED}"
 
       if [ "$PARALLEL" = true ]; then
         GPU_ID=$((job_index % num_gpus))
-        echo "Launching [GPU ${GPU_ID}]: ${TAG}"
-        CUDA_VISIBLE_DEVICES=$GPU_ID $CMD 2>&1 | tee "$LOG" &
+        echo "Launching [GPU ${GPU_ID}] (batch ${BATCH_SIZE}): ${TAG}"
+        TQDM_DISABLE=${DISABLE_TQDM} CUDA_VISIBLE_DEVICES=$GPU_ID $CMD | tee "$LOG" &
       else
-        echo "Running: ${TAG}"
-        $CMD 2>&1 | tee "$LOG"
+        echo "Running (batch ${BATCH_SIZE}): ${TAG}"
+        TQDM_DISABLE=${DISABLE_TQDM} $CMD | tee "$LOG"
       fi
 
       job_index=$((job_index + 1))
