@@ -39,13 +39,12 @@ class InteractionLayer(nn.Module):
     def forward(self, ht, hd, hf):
         N, L, D = ht.size()
         h = torch.stack([ht, hd, hf], dim=2)  # [N, L, 3, D]
-        h = h.permute(0, 2, 1, 3).contiguous().view(N * 3, L, D)  # [N*3, L, D]
-    
-        # Apply attention across the time dimension
+        h = h.view(N * L, 3, D)               # [N*L, 3, D] — attention across views at each timestep
+
         attn_output, _ = self.multihead_attn(h, h, h)
         output = self.norm(h + attn_output)
-        output = output.view(N, 3, L, D).permute(0, 2, 1, 3)  # [N, L, 3, D]
-    
+        output = output.view(N, L, 3, D)
+
         ht_i, hd_i, hf_i = output[:, :, 0, :], output[:, :, 1, :], output[:, :, 2, :]
         return ht_i, hd_i, hf_i
 
@@ -111,6 +110,124 @@ class Encoder(nn.Module):
         zt = self.output_layer_t(torch.cat([ht.mean(dim=1), ht_i.mean(dim=1)], dim=-1))
         zd = self.output_layer_d(torch.cat([hd.mean(dim=1), hd_i.mean(dim=1)], dim=-1))
         zf = self.output_layer_f(torch.cat([hf.mean(dim=1), hf_i.mean(dim=1)], dim=-1))
+
+        return ht, hd, hf, zt, zd, zf
+
+
+class LogSigMLP(nn.Module):
+    """Per-timestep MLP for log signature views.
+
+    Replaces the input_layer + positional_encoding + transformer_encoder pipeline.
+    No positional encoding is applied since time is already encoded in the log signature.
+    Stored as input_layer_d/f in EncoderLogsigMLP so that freeze mode (which checks
+    'input_layer' in parameter name) correctly unfreezes the MLP along with the classifier.
+    """
+    def __init__(self, in_dim, embedding_dim, hidden_dim, dropout):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(in_dim, hidden_dim),
+            nn.LayerNorm(hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim, embedding_dim),
+        )
+
+    def forward(self, x):  # [N, L, C] -> [N, L, embedding_dim]
+        return self.net(x)
+
+
+class EncoderLogsigMLP(nn.Module):
+    """Encoder where logsig views use a per-timestep MLP instead of a transformer.
+
+    For non-logsig views the architecture is identical to Encoder. For logsig views
+    the transformer + positional encoding is replaced by LogSigMLP applied per timestep.
+    All downstream components (interaction layer, output layers) are unchanged.
+    """
+    def __init__(self, args):
+        super().__init__()
+        self.view2 = args.view2
+        self.view3 = args.view3
+        self.positional_encoding = PositionalEncoding(args.num_embedding, args.dropout)
+
+        # View 1 — always transformer
+        self.input_layer_t = nn.Linear(args.num_feature, args.num_embedding)
+        self.encoder_layers_t = nn.TransformerEncoderLayer(
+            d_model=args.num_embedding, dim_feedforward=args.num_hidden,
+            nhead=args.num_head, dropout=args.dropout, batch_first=True)
+        self.transformer_encoder_t = nn.TransformerEncoder(self.encoder_layers_t, args.num_layers)
+
+        # View 2 — MLP if logsig, transformer otherwise
+        in_dim_d = getattr(args, 'num_feature_v2', args.num_feature)
+        if args.view2 == 'logsig':
+            self.input_layer_d = LogSigMLP(in_dim_d, args.num_embedding, args.num_hidden, args.dropout)
+        else:
+            self.input_layer_d = nn.Linear(in_dim_d, args.num_embedding)
+            encoder_layers_d = nn.TransformerEncoderLayer(
+                d_model=args.num_embedding, dim_feedforward=args.num_hidden,
+                nhead=args.num_head, dropout=args.dropout, batch_first=True)
+            self.transformer_encoder_d = nn.TransformerEncoder(encoder_layers_d, args.num_layers)
+
+        # View 3 — MLP if logsig, transformer otherwise
+        in_dim_f = getattr(args, 'num_feature_v3', args.num_feature)
+        if args.view3 == 'logsig':
+            self.input_layer_f = LogSigMLP(in_dim_f, args.num_embedding, args.num_hidden, args.dropout)
+        else:
+            self.input_layer_f = nn.Linear(in_dim_f, args.num_embedding)
+            encoder_layers_f = nn.TransformerEncoderLayer(
+                d_model=args.num_embedding, dim_feedforward=args.num_hidden,
+                nhead=args.num_head, dropout=args.dropout, batch_first=True)
+            self.transformer_encoder_f = nn.TransformerEncoder(encoder_layers_f, args.num_layers)
+
+        self.interaction_layer = InteractionLayer(args.num_embedding, args.num_head)
+        self.output_layer_t = nn.Sequential(
+            nn.Linear(args.num_embedding * 2, args.num_hidden),
+            nn.LayerNorm(args.num_hidden), nn.ReLU(), nn.Dropout(args.dropout),
+            nn.Linear(args.num_hidden, args.num_hidden)
+        )
+        self.output_layer_d = nn.Sequential(
+            nn.Linear(args.num_embedding * 2, args.num_hidden),
+            nn.LayerNorm(args.num_hidden), nn.ReLU(), nn.Dropout(args.dropout),
+            nn.Linear(args.num_hidden, args.num_hidden)
+        )
+        self.output_layer_f = nn.Sequential(
+            nn.Linear(args.num_embedding * 2, args.num_hidden),
+            nn.LayerNorm(args.num_hidden), nn.ReLU(), nn.Dropout(args.dropout),
+            nn.Linear(args.num_hidden, args.num_hidden)
+        )
+
+    def forward(self, xt, dx, xf):
+        xt, dx, xf = torch.nan_to_num(xt), torch.nan_to_num(dx), torch.nan_to_num(xf)
+
+        ht = self.input_layer_t(xt)
+        ht = self.positional_encoding(ht)
+        ht = self.transformer_encoder_t(ht)
+
+        if self.view2 == 'logsig':
+            hd = self.input_layer_d(dx)
+        else:
+            hd = self.input_layer_d(dx)
+            hd = self.positional_encoding(hd)
+            hd = self.transformer_encoder_d(hd)
+
+        if self.view3 == 'logsig':
+            hf = self.input_layer_f(xf)
+        else:
+            hf = self.input_layer_f(xf)
+            hf = self.positional_encoding(hf)
+            hf = self.transformer_encoder_f(hf)
+
+        ht_i, hd_i, hf_i = self.interaction_layer(ht, hd, hf)
+
+        zt = self.output_layer_t(torch.cat([ht.mean(dim=1), ht_i.mean(dim=1)], dim=-1))
+        # Logsig is cumulative: position -1 is the global log signature of the full path,
+        # which is the most informative summary. Mean pooling would dilute it with
+        # near-empty early positions (logsig of just the first few steps).
+        zd_pool = hd[:, -1, :] if self.view2 == 'logsig' else hd.mean(dim=1)
+        zd_i_pool = hd_i[:, -1, :] if self.view2 == 'logsig' else hd_i.mean(dim=1)
+        zd = self.output_layer_d(torch.cat([zd_pool, zd_i_pool], dim=-1))
+        zf_pool = hf[:, -1, :] if self.view3 == 'logsig' else hf.mean(dim=1)
+        zf_i_pool = hf_i[:, -1, :] if self.view3 == 'logsig' else hf_i.mean(dim=1)
+        zf = self.output_layer_f(torch.cat([zf_pool, zf_i_pool], dim=-1))
 
         return ht, hd, hf, zt, zd, zf
 
@@ -195,10 +312,15 @@ class Classifier(nn.Module):
             else:
                 ht_i, hd_i, hf_i = ht, hd, hf
             
-            # output layers
+            # output layers — logsig views use last-step pooling (cumulative: final position
+            # is the global log signature, the most informative summary)
             zt = self.output_layer_t(torch.cat([ht.mean(dim=1), ht_i.mean(dim=1)], dim=-1))
-            zd = self.output_layer_d(torch.cat([hd.mean(dim=1), hd_i.mean(dim=1)], dim=-1))
-            zf = self.output_layer_f(torch.cat([hf.mean(dim=1), hf_i.mean(dim=1)], dim=-1))
+            d_pool = hd[:, -1, :] if getattr(self.args, 'view2', '') == 'logsig' else hd.mean(dim=1)
+            d_i_pool = hd_i[:, -1, :] if getattr(self.args, 'view2', '') == 'logsig' else hd_i.mean(dim=1)
+            zd = self.output_layer_d(torch.cat([d_pool, d_i_pool], dim=-1))
+            f_pool = hf[:, -1, :] if getattr(self.args, 'view3', '') == 'logsig' else hf.mean(dim=1)
+            f_i_pool = hf_i[:, -1, :] if getattr(self.args, 'view3', '') == 'logsig' else hf_i.mean(dim=1)
+            zf = self.output_layer_f(torch.cat([f_pool, f_i_pool], dim=-1))
         
         if self.args.loss_type == 'ALL':
             emb = torch.cat([zt, zd, zf], dim=-1)

@@ -45,17 +45,36 @@ append_results() {
 }
 
 log_msg "Pipeline started"
-log_msg "Running pretrain sweep: bash run_sweep.sh"
+
+log_msg "Running pretrain sweep (transformer): bash run_sweep.sh"
 bash run_sweep.sh 2>&1 | tee -a "$PIPELINE_LOG"
 PRETRAIN_STATUS=${PIPESTATUS[0]}
 
 if [ "$PRETRAIN_STATUS" -ne 0 ]; then
-  log_msg "Pretrain sweep failed with status ${PRETRAIN_STATUS}; aborting finetune."
+  log_msg "Pretrain sweep (transformer) failed with status ${PRETRAIN_STATUS}; aborting."
   exit "$PRETRAIN_STATUS"
 fi
 
-log_msg "Running finetune sweep: bash run_finetune_epilepsy_sweep.sh"
+log_msg "Running pretrain sweep (mlp_logsig): bash run_sweep_mlp_logsig.sh"
+bash run_sweep_mlp_logsig.sh 2>&1 | tee -a "$PIPELINE_LOG"
+PRETRAIN_MLP_STATUS=${PIPESTATUS[0]}
+
+if [ "$PRETRAIN_MLP_STATUS" -ne 0 ]; then
+  log_msg "Pretrain sweep (mlp_logsig) failed with status ${PRETRAIN_MLP_STATUS}; aborting."
+  exit "$PRETRAIN_MLP_STATUS"
+fi
+
+log_msg "Running finetune sweep (transformer): bash run_finetune_epilepsy_sweep.sh"
 bash run_finetune_epilepsy_sweep.sh 2>&1 | tee -a "$PIPELINE_LOG"
+FINETUNE_STATUS=${PIPESTATUS[0]}
+
+if [ "$FINETUNE_STATUS" -ne 0 ]; then
+  log_msg "Finetune sweep (transformer) failed with status ${FINETUNE_STATUS}; aborting."
+  exit "$FINETUNE_STATUS"
+fi
+
+log_msg "Running finetune sweep (mlp_logsig): bash run_finetune_epilepsy_sweep_mlp_logsig.sh"
+bash run_finetune_epilepsy_sweep_mlp_logsig.sh 2>&1 | tee -a "$PIPELINE_LOG"
 FINETUNE_STATUS=${PIPESTATUS[0]}
 
 # Collect summaries from all datasets discovered in output folders.

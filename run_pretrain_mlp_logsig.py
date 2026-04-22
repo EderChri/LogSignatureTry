@@ -3,7 +3,7 @@ import sys
 import math
 import random
 import argparse
-import pickle 
+import pickle
 import time
 import gc
 from datetime import datetime
@@ -29,6 +29,8 @@ from src.trainer import *
 from src.evaluation import *
 from src.utils import *
 
+Encoder = EncoderLogsigMLP  # logsig views use per-timestep MLP instead of transformer
+
 use_cuda = torch.cuda.is_available()
 device = torch.device("cuda" if use_cuda else "cpu")
 
@@ -52,28 +54,28 @@ def seed_everything(seed):
     torch.cuda.manual_seed_all(seed)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = True
-    
+
 args = parse_args()
 seed_everything(args.seed)
 run_start_time = time.time()
 
 print(
-    f"Starting pretrain: data={args.data_name}, view2={args.view2}, view3={args.view3}, "
+    f"Starting pretrain (mlp_logsig): data={args.data_name}, view2={args.view2}, view3={args.view3}, "
     f"epochs={args.epochs_pretrain}, batch={args.batch_size_pretrain}, seed={args.seed}",
     flush=True,
 )
 
 ## Check if output already exists
 _data_tag = f'{args.data_name}-full' if args.full_training else args.data_name
-output_file = f'out_pretrain/{args.data_name}/{_data_tag}_v2{args.view2}_v3{args.view3}_ep{args.epochs_pretrain}_{args.seed}'
+output_file = f'out_pretrain/{args.data_name}/{_data_tag}_v2{args.view2}_v3{args.view3}_ep{args.epochs_pretrain}_{args.seed}_mlp_logsig'
 
 if os.path.exists(output_file):
     print(f"Output file {output_file} already exists. Skipping this run.")
     sys.exit(0)
 
 # Resume checkpoint path for interrupted runs
-resume_ckpt_path = f'out_pretrain/.resume_{args.data_name}_v2{args.view2}_v3{args.view3}_ep{args.epochs_pretrain}_{args.seed}.pth'
-    
+resume_ckpt_path = f'out_pretrain/.resume_{args.data_name}_v2{args.view2}_v3{args.view3}_ep{args.epochs_pretrain}_{args.seed}_mlp_logsig.pth'
+
 #
 args.context_len = int(args.data_name.split('_')[3])
 args.horizon_len = int(args.data_name.split('_')[4])
@@ -158,8 +160,8 @@ scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(encoder_optimizer, mode='
 
 loss_list = []
 best_valid_loss = float('inf')
-best_model_path = f'model_pretrain/{args.data_name}/{args.data_name}_v2{args.view2}_v3{args.view3}_ep{args.epochs_pretrain}_{args.seed}.pth'
-output_file = f'out_pretrain/{args.data_name}/{args.data_name}_v2{args.view2}_v3{args.view3}_ep{args.epochs_pretrain}_{args.seed}'
+best_model_path = f'model_pretrain/{args.data_name}/{args.data_name}_v2{args.view2}_v3{args.view3}_ep{args.epochs_pretrain}_{args.seed}_mlp_logsig.pth'
+output_file = f'out_pretrain/{args.data_name}/{args.data_name}_v2{args.view2}_v3{args.view3}_ep{args.epochs_pretrain}_{args.seed}_mlp_logsig'
 
 # Early stopping parameters
 patience = 20
@@ -170,7 +172,7 @@ epoch_start = 1
 if os.path.exists(resume_ckpt_path):
     print(f"Loading resume checkpoint: {resume_ckpt_path}", flush=True)
     resume_state = torch.load(resume_ckpt_path, map_location='cpu', weights_only=False)
-    
+
     # Validate num_feature matches
     resume_num_feature = resume_state.get('num_feature')
     if resume_num_feature is not None and resume_num_feature != args.num_feature:
@@ -180,7 +182,7 @@ if os.path.exists(resume_ckpt_path):
             file=sys.stderr,
         )
         sys.exit(1)
-    
+
     epoch_start = resume_state['epoch'] + 1
     best_valid_loss = resume_state['best_valid_loss']
     loss_list = resume_state['loss_list']
@@ -197,11 +199,11 @@ for epoch in range(epoch_start, args.epochs_pretrain + 1):
     epoch_start_time = time.time()
     encoder.train()
     train_loss = train(args, encoder, None, encoder_optimizer, None, pretrain_loader, mode='pretrain', device=device)
-    
+
     encoder.eval()
     with torch.no_grad():
         valid_loss = test(args, encoder, None, prevalid_loader, mode='pretrain', device=device)
-    
+
     scheduler.step(valid_loss)
 
     epoch_elapsed = time.time() - epoch_start_time
@@ -209,7 +211,7 @@ for epoch in range(epoch_start, args.epochs_pretrain + 1):
     avg_epoch_sec = sum(epoch_durations) / len(epoch_durations)
     remaining_epochs = args.epochs_pretrain - epoch
     eta_minutes = (avg_epoch_sec * remaining_epochs) / 60
-    
+
     print(
         f'Epoch {epoch}: Train Loss = {train_loss:.4f}, Validation Loss = {valid_loss:.4f}, '
         f'Epoch Time = {epoch_elapsed:.1f}s, ETA = {eta_minutes:.2f} min',
@@ -217,17 +219,15 @@ for epoch in range(epoch_start, args.epochs_pretrain + 1):
     )
     epochs_trained = epoch
     loss_list.append([train_loss, valid_loss])
-    
+
     if valid_loss < best_valid_loss:
         best_valid_loss = valid_loss
         early_stop_counter = 0
         print(f'[Saving model at epoch {epoch} with validation loss {valid_loss:.4f}]')
-        
-        # Save the model state, optimizer state, and current epoch
+
         torch.save({
             'epoch': epoch,
             'args': args,
-            # 'encoder_state_dict': encoder.state_dict(),
             'encoder_state_dict': encoder.module.state_dict() if isinstance(encoder, (nn.DataParallel, nn.parallel.DistributedDataParallel)) else encoder.state_dict(),
             'optimizer_state_dict': encoder_optimizer.state_dict(),
             'scheduler_state_dict': scheduler.state_dict(),
@@ -236,7 +236,7 @@ for epoch in range(epoch_start, args.epochs_pretrain + 1):
         }, best_model_path)
     else:
         early_stop_counter += 1
-    
+
     # Save resume checkpoint after each epoch for safe interruption
     os.makedirs(os.path.dirname(resume_ckpt_path), exist_ok=True)
     torch.save({
@@ -248,8 +248,7 @@ for epoch in range(epoch_start, args.epochs_pretrain + 1):
         'best_valid_loss': best_valid_loss,
         'early_stop_counter': early_stop_counter,
     }, resume_ckpt_path)
-    
-    # Check for early stopping
+
     if early_stop_counter >= patience:
         print(f'Early stopping triggered at epoch {epoch}')
         break

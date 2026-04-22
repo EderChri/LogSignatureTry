@@ -1,11 +1,9 @@
 #!/bin/bash
 # =============================================================================
-# Pretrain sweep script
-# Usage: bash run_sweep.sh
-#
-# Configure the arrays below, then run. If SEEDS has only one entry it is
-# reused for every combination. Jobs run sequentially by default; set
-# PARALLEL=true to assign each job to a separate GPU via CUDA_VISIBLE_DEVICES.
+# Pretrain sweep script — MLP logsig encoder variant
+# Uses run_pretrain_mlp_logsig.py (logsig views processed by per-timestep MLP
+# instead of transformer). Checkpoints are saved with _mlp_logsig suffix.
+# Usage: bash run_sweep_mlp_logsig.sh
 # =============================================================================
 
 # --- Dataset ------------------------------------------------------------------
@@ -15,7 +13,7 @@ NUM_TARGET=5
 
 # --- Sweep axes ---------------------------------------------------------------
 SEEDS=(0)                           # add more seeds: (0 1 2)
-EPOCHS=(2)                        # add more epoch counts: (100 200)
+EPOCHS=(2)                          # add more epoch counts: (100 200)
 VIEW2S=("dx" "logsig")              # second view per combination
 VIEW3S=("xf" "xf")                  # third view per combination (must match length of VIEW2S)
 
@@ -24,7 +22,7 @@ PARALLEL=false                      # set to true to run jobs on separate GPUs i
 DEFAULT_BATCH_SIZE=64
 LOGSIG_BATCH_SIZE=32
 DISABLE_TQDM=0
-SKIP_TAGS=("_DA_SleepEEG_256_00_v2dx_v3xf_ep200_seed0")  # finished runs to skip
+SKIP_TAGS=()
 # =============================================================================
 
 mkdir -p logs
@@ -37,12 +35,11 @@ for EPOCHS_VAL in "${EPOCHS[@]}"; do
     V2="${VIEW2S[$i]}"
     V3="${VIEW3S[$i]}"
 
-    # Use the single seed if only one was provided, otherwise iterate
     seed_list=("${SEEDS[@]}")
 
     for j in "${!seed_list[@]}"; do
       SEED="${seed_list[$j]}"
-      TAG="${DATA}_v2${V2}_v3${V3}_ep${EPOCHS_VAL}_seed${SEED}"
+      TAG="${DATA}_v2${V2}_v3${V3}_ep${EPOCHS_VAL}_seed${SEED}_mlp_logsig"
       LOG="logs/${TAG}.log"
 
       should_skip=false
@@ -64,7 +61,7 @@ for EPOCHS_VAL in "${EPOCHS[@]}"; do
         BATCH_SIZE=${LOGSIG_BATCH_SIZE}
       fi
 
-      CMD="python -u run_pretrain.py \
+      CMD="python -u run_pretrain_mlp_logsig.py \
         --data_name ${DATA} \
         --num_feature ${NUM_FEATURE} \
         --num_target ${NUM_TARGET} \
@@ -88,7 +85,6 @@ for EPOCHS_VAL in "${EPOCHS[@]}"; do
   done
 done
 
-# Wait for all background jobs if running in parallel
 if [ "$PARALLEL" = true ]; then
   echo "Waiting for all jobs to finish..."
   wait

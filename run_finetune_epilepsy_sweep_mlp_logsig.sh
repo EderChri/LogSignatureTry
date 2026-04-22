@@ -1,11 +1,9 @@
 #!/bin/bash
 # =============================================================================
-# Finetune sweep on Epilepsy using pretrained checkpoints from run_sweep.sh.
-# Usage: bash run_finetune_epilepsy_sweep.sh
-#
-# This runs one finetune invocation per pretrained configuration.
-# Each invocation uses the matching pretrain tag:
-#   <PRETRAIN_DATA>_v2<V2>_v3<V3>_ep<PRETRAIN_EPOCHS>_<SEED>.pth
+# Finetune sweep on Epilepsy — MLP logsig encoder variant
+# Uses run_finetune_mlp_logsig.py and expects checkpoints produced by
+# run_sweep_mlp_logsig.sh (i.e. with _mlp_logsig suffix).
+# Usage: bash run_finetune_epilepsy_sweep_mlp_logsig.sh
 # =============================================================================
 
 # --- Source pretrained models -------------------------------------------------
@@ -42,7 +40,7 @@ for PRE_EPOCHS in "${PRETRAIN_EPOCHS[@]}"; do
 
     for j in "${!SEEDS[@]}"; do
       SEED="${SEEDS[$j]}"
-      PT_TAG="${PRETRAIN_DATA}_v2${V2}_v3${V3}_ep${PRE_EPOCHS}_${SEED}"
+      PT_TAG="${PRETRAIN_DATA}_v2${V2}_v3${V3}_ep${PRE_EPOCHS}_${SEED}_mlp_logsig"
       PT_CKPT="model_pretrain/${PRETRAIN_DATA}/${PT_TAG}.pth"
 
       if [ ! -f "$PT_CKPT" ]; then
@@ -53,7 +51,7 @@ for PRE_EPOCHS in "${PRETRAIN_EPOCHS[@]}"; do
       TAG="ft_${FINETUNE_DATA}_from_${PT_TAG}"
       LOG="logs/${TAG}.log"
 
-      CMD="python run_finetune.py \
+      CMD="python run_finetune_mlp_logsig.py \
         --data_name ${FINETUNE_DATA} \
         --pretrain_data_name ${PRETRAIN_DATA} \
         --num_feature ${NUM_FEATURE} \
