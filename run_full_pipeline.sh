@@ -1,12 +1,13 @@
 #!/bin/bash
 # =============================================================================
-# End-to-end pipeline:
-# 1) run pretrain sweep
-# 2) run finetune sweep
-# 3) persist combined result summaries
+# End-to-end pipeline: pretrain → finetune → probe → aggregate for all pairs.
+#
+# Uses the unified run_sweep.sh with datasets.cfg for all dataset pairs.
+# Each pair runs: pretrain → finetune → probe (all 3 stages sequentially).
 #
 # Usage:
 #   bash run_full_pipeline.sh
+#   bash run_full_pipeline.sh sleepeeg_epilepsy   # one pair only
 # =============================================================================
 
 set -u
@@ -44,38 +45,20 @@ append_results() {
   log_msg "Appended results from ${summary_file}"
 }
 
-log_msg "Pipeline started"
+REQUESTED="${1:-all}"
 
-log_msg "Running pretrain sweep (transformer): bash run_sweep.sh"
-bash run_sweep.sh 2>&1 | tee -a "$PIPELINE_LOG"
-PRETRAIN_STATUS=${PIPESTATUS[0]}
+log_msg "Pipeline started (pair: ${REQUESTED})"
 
-if [ "$PRETRAIN_STATUS" -ne 0 ]; then
-  log_msg "Pretrain sweep (transformer) failed with status ${PRETRAIN_STATUS}; aborting."
-  exit "$PRETRAIN_STATUS"
+log_msg "Running sweep: bash run_sweep.sh ${REQUESTED}"
+bash run_sweep.sh "${REQUESTED}" 2>&1 | tee -a "$PIPELINE_LOG"
+if [ "${PIPESTATUS[0]}" -ne 0 ]; then
+  log_msg "Sweep failed; aborting."
+  exit 1
 fi
 
-log_msg "Running pretrain sweep (mlp_logsig): bash run_sweep_mlp_logsig.sh"
-bash run_sweep_mlp_logsig.sh 2>&1 | tee -a "$PIPELINE_LOG"
-PRETRAIN_MLP_STATUS=${PIPESTATUS[0]}
-
-if [ "$PRETRAIN_MLP_STATUS" -ne 0 ]; then
-  log_msg "Pretrain sweep (mlp_logsig) failed with status ${PRETRAIN_MLP_STATUS}; aborting."
-  exit "$PRETRAIN_MLP_STATUS"
-fi
-
-log_msg "Running finetune sweep (transformer): bash run_finetune_epilepsy_sweep.sh"
-bash run_finetune_epilepsy_sweep.sh 2>&1 | tee -a "$PIPELINE_LOG"
-FINETUNE_STATUS=${PIPESTATUS[0]}
-
-if [ "$FINETUNE_STATUS" -ne 0 ]; then
-  log_msg "Finetune sweep (transformer) failed with status ${FINETUNE_STATUS}; aborting."
-  exit "$FINETUNE_STATUS"
-fi
-
-log_msg "Running finetune sweep (mlp_logsig): bash run_finetune_epilepsy_sweep_mlp_logsig.sh"
-bash run_finetune_epilepsy_sweep_mlp_logsig.sh 2>&1 | tee -a "$PIPELINE_LOG"
-FINETUNE_STATUS=${PIPESTATUS[0]}
+# Aggregate multi-seed results
+log_msg "Aggregating multi-seed results: python aggregate_results.py"
+python aggregate_results.py 2>&1 | tee -a "$PIPELINE_LOG"
 
 # Collect summaries from all datasets discovered in output folders.
 for pretrain_summary in out_pretrain/*/final_pretrain_summary.tsv; do
@@ -87,11 +70,6 @@ for finetune_summary in out_finetune/*/final_test_metric_summary.tsv; do
   [ -f "$finetune_summary" ] || continue
   append_results "finetune" "$finetune_summary" "final_test_score"
 done
-
-if [ "$FINETUNE_STATUS" -ne 0 ]; then
-  log_msg "Finetune sweep failed with status ${FINETUNE_STATUS}."
-  exit "$FINETUNE_STATUS"
-fi
 
 log_msg "Pipeline finished successfully"
 log_msg "Pipeline log: ${PIPELINE_LOG}"

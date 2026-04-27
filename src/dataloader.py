@@ -49,29 +49,99 @@ def get_xf(X: torch.Tensor) -> torch.Tensor:
     return torch.abs(fft.fft(X, dim=1))  # Use dim=1 for the sequence dimension
 
 
-def get_logsig(X: torch.Tensor, depth: int) -> torch.Tensor:
-    """Running log signature of the time-augmented path.
+def _tukey_weights(W: int, alpha: float, dtype, device) -> torch.Tensor:
+    """Tukey (tapered-cosine) window of length W, tapering ratio alpha.
 
-    Prepends a t in [0,1] coordinate so the path lives in R^(D+1), then at
-    each step t returns the log signature of the sub-path [0, t].  The time
-    channel ensures the logsig is non-trivial even for single-channel inputs.
+    alpha=0 → rectangular, alpha=1 → Hann.
+    Returns shape [W].
+    """
+    import math
+    w = torch.ones(W, dtype=dtype, device=device)
+    taper = int(math.floor(alpha * W / 2))
+    if taper > 0:
+        k = torch.arange(taper, dtype=dtype, device=device)
+        cos_taper = 0.5 * (1 - torch.cos(math.pi * k / taper))
+        w[:taper] = cos_taper
+        w[W - taper:] = cos_taper.flip(0)
+    return w
+
+
+def _smooth_ema(X: torch.Tensor, alpha: float) -> torch.Tensor:
+    """Exponential moving average along the time axis (dim=1)."""
+    N, L, D = X.shape
+    out = X.clone()
+    for t in range(1, L):
+        out[:, t, :] = alpha * X[:, t, :] + (1 - alpha) * out[:, t - 1, :]
+    return out
+
+
+def get_logsig(
+    X: torch.Tensor,
+    depth: int,
+    mode: str = 'stream',
+    window_size: int = 32,
+    smoothing: str = 'tukey',
+    smooth_param: float = 0.5,
+) -> torch.Tensor:
+    """Log signature view of the time-augmented path.
+
+    Three modes are supported:
+    - 'stream':        Running log-sig of [0, t] at each step t.
+                       Output shape: [N, L, C] (position 0 is zero-padded).
+    - 'window':        Log-sig of the sliding window [t-W+1, t] of size W.
+    - 'window_smooth': Sliding window with smoothing applied to each window
+                       segment before computing the signature.
+                       smoothing='tukey': multiply window samples by a Tukey
+                         (tapered-cosine) weight vector; smooth_param = alpha
+                         tapering ratio (0 = rect, 1 = Hann).
+                       smoothing='ema': replace each window with its EMA;
+                         smooth_param = decay alpha.
+
+    All modes prepend a t∈[0,1] time channel (local to each window/path) so
+    that single-channel inputs still produce non-trivial signatures.
 
     Args:
-        X:     [N, L, D]
-        depth: truncation depth
+        X:            [N, L, D]
+        depth:        truncation depth
+        mode:         'stream' | 'window' | 'window_smooth'
+        window_size:  sliding window length W (used for window modes)
+        smoothing:    'tukey' | 'ema'  (used for window_smooth mode)
+        smooth_param: tapering ratio for tukey or alpha decay for ema
 
     Returns:
         [N, L, logsig_channels(D+1, depth)]
-        Position 0 is a zero vector (log sig of the empty path);
-        position t > 0 is the log sig of the time-augmented path up to step t.
     """
     N, L, D = X.shape
-    t = torch.linspace(0, 1, L, dtype=X.dtype, device=X.device)
-    t = t.view(1, L, 1).expand(N, -1, -1)
-    X_time = torch.cat([t, X], dim=-1)                       # [N, L, D+1]
-    logsig = log_signature(X_time, depth, stream=True)  # [N, L-1, C]
-    pad = torch.zeros(N, 1, logsig.shape[-1], dtype=X.dtype, device=X.device)
-    return torch.cat([pad, logsig], dim=1)                   # [N, L, C]
+
+    if mode == 'stream':
+        t = torch.linspace(0, 1, L, dtype=X.dtype, device=X.device)
+        t = t.view(1, L, 1).expand(N, -1, -1)
+        X_time = torch.cat([t, X], dim=-1)                    # [N, L, D+1]
+        logsig = log_signature(X_time, depth, stream=True)    # [N, L-1, C]
+        pad = torch.zeros(N, 1, logsig.shape[-1], dtype=X.dtype, device=X.device)
+        return torch.cat([pad, logsig], dim=1)                # [N, L, C]
+
+    # Windowed modes
+    C = logsigdim(D + 1, depth)
+    out = torch.zeros(N, L, C, dtype=X.dtype, device=X.device)
+    for end in range(1, L + 1):
+        start = max(0, end - window_size)
+        seg = X[:, start:end, :].clone()                      # [N, W, D]
+        W = seg.shape[1]
+
+        if mode == 'window_smooth':
+            if smoothing == 'tukey':
+                weights = _tukey_weights(W, smooth_param, seg.dtype, seg.device)
+                seg = seg * weights.view(1, W, 1)
+            else:  # ema
+                seg = _smooth_ema(seg, smooth_param)
+
+        # Local time in [0, 1] within the window
+        seg_t = torch.linspace(0, 1, W, dtype=X.dtype, device=X.device)
+        seg_t = seg_t.view(1, W, 1).expand(N, -1, -1)
+        seg_full = torch.cat([seg_t, seg], dim=-1)            # [N, W, D+1]
+        out[:, end - 1, :] = log_signature(seg_full, depth)  # global logsig of window
+    return out
 
 
 def get_view_num_features(view: str, num_feature: int, logsig_depth: int) -> int:
@@ -84,7 +154,10 @@ def get_view_num_features(view: str, num_feature: int, logsig_depth: int) -> int
         raise ValueError(f"Unknown view '{view}'. Choose from: xt, dx, xf, logsig")
 
 
-def preprocess_data(X_train, X_test, views=('xt', 'dx', 'xf'), logsig_depth=2, time_as_feature=False):
+def preprocess_data(X_train, X_test, views=('xt', 'dx', 'xf'), logsig_depth=2,
+                    logsig_mode='stream', logsig_window_size=32,
+                    logsig_smoothing='tukey', logsig_smooth_param=0.5,
+                    time_as_feature=False):
     """Preprocess training and test data for the requested views.
 
     Args:
@@ -122,8 +195,12 @@ def preprocess_data(X_train, X_test, views=('xt', 'dx', 'xf'), logsig_depth=2, t
                 data_tr = add_time_feature(data_tr)
                 data_te = add_time_feature(data_te)
         elif view == 'logsig':
-            data_tr = get_logsig(X_train_xt, logsig_depth)
-            data_te = get_logsig(X_test_xt, logsig_depth)
+            data_tr = get_logsig(X_train_xt, logsig_depth,
+                                 mode=logsig_mode, window_size=logsig_window_size,
+                                 smoothing=logsig_smoothing, smooth_param=logsig_smooth_param)
+            data_te = get_logsig(X_test_xt, logsig_depth,
+                                 mode=logsig_mode, window_size=logsig_window_size,
+                                 smoothing=logsig_smoothing, smooth_param=logsig_smooth_param)
             data_tr, data_te, mean, std = normalize(data_tr, data_te)
         else:
             raise ValueError(f"Unknown view '{view}'. Choose from: xt, dx, xf, logsig")

@@ -31,6 +31,20 @@ use_cuda = torch.cuda.is_available()
 device = torch.device("cuda" if use_cuda else "cpu")
 
 
+def _build_new_num_features(args):
+    """Build the new_num_features dict for load_encoder.
+
+    For mlp_logsig encoder, logsig views use LogSigMLP whose state-dict keys
+    differ from a plain Linear, so dimension checking is skipped for those slots.
+    """
+    d = {'input_layer_t': args.num_feature}
+    if not (args.encoder_type == 'mlp_logsig' and args.view2 == 'logsig'):
+        d['input_layer_d'] = args.num_feature_v2
+    if not (args.encoder_type == 'mlp_logsig' and args.view3 == 'logsig'):
+        d['input_layer_f'] = args.num_feature_v3
+    return d
+
+
 def write_final_metric_row(summary_path, run_name, final_test_score, epochs_trained):
     if not os.path.exists(summary_path):
         with open(summary_path, 'w') as f:
@@ -53,6 +67,20 @@ def seed_everything(seed):
     
 args = parse_args()
 seed_everything(args.seed)
+
+_enc_suffix = f'_{args.encoder_type}' if args.encoder_type != 'transformer' else ''
+
+def _logsig_suffix(args) -> str:
+    mode = getattr(args, 'logsig_mode', 'stream')
+    if mode == 'stream':
+        return ''
+    wsiz = getattr(args, 'logsig_window_size', 32)
+    if mode == 'window':
+        return f'_win{wsiz}'
+    smoothing = getattr(args, 'logsig_smoothing', 'tukey')
+    return f'_{smoothing}{wsiz}'
+
+_lsig_suffix = _logsig_suffix(args)
 
 # Resolve pretrained model source dataset (defaults to the finetune dataset)
 if args.pretrain_data_name is None:
@@ -77,31 +105,29 @@ with open(f'preprocessed_data/{args.data_name}.pkl', 'rb') as f:
     X_train_intp, X_train_shirink, X_train_forecast, y_train, X_val_intp, X_val_shirink, X_val_forecast, y_val, X_test_intp, X_test_shirink, X_test_forecast, y_test = pickle.load(f)
 
 ##
-X_train_aug = X_train_intp
-X_val_aug = X_val_intp
-X_test_aug = X_test_intp
-
 X_train_intp = torch.tensor(X_train_intp).transpose(1,2)
-X_train_aug = torch.tensor(X_train_aug).transpose(1,2)
 y_train = torch.tensor(y_train)
-
 X_val_intp = torch.tensor(X_val_intp).transpose(1,2)
-X_val_aug = torch.tensor(X_val_aug).transpose(1,2)
 y_val = torch.tensor(y_val)
-
 X_test_intp = torch.tensor(X_test_intp).transpose(1,2)
-X_test_aug = torch.tensor(X_test_aug).transpose(1,2)
 y_test = torch.tensor(y_test)
 
 ##
 views = ('xt', args.view2, args.view3)
+_logsig_kw = dict(
+    logsig_depth=args.logsig_depth,
+    logsig_mode=getattr(args, 'logsig_mode', 'stream'),
+    logsig_window_size=getattr(args, 'logsig_window_size', 32),
+    logsig_smoothing=getattr(args, 'logsig_smoothing', 'tukey'),
+    logsig_smooth_param=getattr(args, 'logsig_smooth_param', 0.5),
+)
 
-preprocessed_data = preprocess_data(X_train_intp, X_val_intp, views=views, logsig_depth=args.logsig_depth)
+preprocessed_data = preprocess_data(X_train_intp, X_val_intp, views=views, **_logsig_kw)
 X_train_intp_v1, X_val_intp_v1, _, _ = preprocessed_data['v1']
 X_train_intp_v2, X_val_intp_v2, _, _ = preprocessed_data['v2']
 X_train_intp_v3, X_val_intp_v3, _, _ = preprocessed_data['v3']
 
-preprocessed_data = preprocess_data(X_train_intp, X_test_intp, views=views, logsig_depth=args.logsig_depth)
+preprocessed_data = preprocess_data(X_train_intp, X_test_intp, views=views, **_logsig_kw)
 X_train_intp_v1, X_test_intp_v1, _, _ = preprocessed_data['v1']
 X_train_intp_v2, X_test_intp_v2, _, _ = preprocessed_data['v2']
 X_train_intp_v3, X_test_intp_v3, _, _ = preprocessed_data['v3']
@@ -129,7 +155,7 @@ if args.num_feature > 64:
 args.num_feature_v2 = get_view_num_features(args.view2, args.num_feature, args.logsig_depth)
 args.num_feature_v3 = get_view_num_features(args.view3, args.num_feature, args.logsig_depth)
 
-pretrain_tag = f'{args.pretrain_data_name}_v2{args.view2}_v3{args.view3}_ep{args.epochs_pretrain}_{args.seed}'
+pretrain_tag = f'{args.pretrain_data_name}_v2{args.view2}_v3{args.view3}_ep{args.epochs_pretrain}_{args.seed}{_enc_suffix}{_lsig_suffix}'
 best_model_path = f'model_pretrain/{args.pretrain_data_name}/{pretrain_tag}.pth'
 
 ##
@@ -150,21 +176,13 @@ for k in range(K):
 
     if torch.cuda.device_count() > 1:
         encoder = Encoder(args)
-        encoder = load_encoder(encoder, best_model_path, {
-                'input_layer_t': args.num_feature,
-                'input_layer_d': args.num_feature_v2,
-                'input_layer_f': args.num_feature_v3,
-            })
+        encoder = load_encoder(encoder, best_model_path, _build_new_num_features(args))
         encoder = nn.DataParallel(encoder).to(device)
         clf = Classifier(args)
         clf = nn.DataParallel(clf).to(device)
     else:
         encoder = Encoder(args)
-        encoder = load_encoder(encoder, best_model_path, {
-                'input_layer_t': args.num_feature,
-                'input_layer_d': args.num_feature_v2,
-                'input_layer_f': args.num_feature_v3,
-            })
+        encoder = load_encoder(encoder, best_model_path, _build_new_num_features(args))
         encoder = encoder.to(device)
         clf = Classifier(args).to(device)
     
@@ -247,21 +265,13 @@ for k in range(K):
     ## Run -- freeze
     if torch.cuda.device_count() > 1:
         encoder = Encoder(args)
-        encoder = load_encoder(encoder, best_model_path, {
-                'input_layer_t': args.num_feature,
-                'input_layer_d': args.num_feature_v2,
-                'input_layer_f': args.num_feature_v3,
-            })
+        encoder = load_encoder(encoder, best_model_path, _build_new_num_features(args))
         encoder = nn.DataParallel(encoder).to(device)
         clf = Classifier(args)
         clf = nn.DataParallel(clf).to(device)
     else:
         encoder = Encoder(args)
-        encoder = load_encoder(encoder, best_model_path, {
-                'input_layer_t': args.num_feature,
-                'input_layer_d': args.num_feature_v2,
-                'input_layer_f': args.num_feature_v3,
-            })
+        encoder = load_encoder(encoder, best_model_path, _build_new_num_features(args))
         encoder = encoder.to(device)
         clf = Classifier(args).to(device)
     

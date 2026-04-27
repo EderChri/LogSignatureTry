@@ -177,3 +177,11 @@ preprocessed_data/
 out_pretrain/
 out_finetune
 model_pretrain
+*_old
+ECG
+EMG
+Epilepsy
+harth
+har70plus
+SleepEEg
+logs

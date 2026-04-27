@@ -57,22 +57,38 @@ args = parse_args()
 seed_everything(args.seed)
 run_start_time = time.time()
 
+_enc_suffix = f'_{args.encoder_type}' if args.encoder_type != 'transformer' else ''
+
+def _logsig_suffix(args) -> str:
+    """Suffix encoding logsig mode + window size — empty for default stream mode."""
+    mode = getattr(args, 'logsig_mode', 'stream')
+    if mode == 'stream':
+        return ''
+    wsiz = getattr(args, 'logsig_window_size', 32)
+    if mode == 'window':
+        return f'_win{wsiz}'
+    smoothing = getattr(args, 'logsig_smoothing', 'tukey')
+    return f'_{smoothing}{wsiz}'   # e.g. _tukey32  _ema16
+
+_lsig_suffix = _logsig_suffix(args)
+
 print(
-    f"Starting pretrain: data={args.data_name}, view2={args.view2}, view3={args.view3}, "
+    f"Starting pretrain: data={args.data_name}, encoder={args.encoder_type}, "
+    f"view2={args.view2}, view3={args.view3}, "
     f"epochs={args.epochs_pretrain}, batch={args.batch_size_pretrain}, seed={args.seed}",
     flush=True,
 )
 
 ## Check if output already exists
 _data_tag = f'{args.data_name}-full' if args.full_training else args.data_name
-output_file = f'out_pretrain/{args.data_name}/{_data_tag}_v2{args.view2}_v3{args.view3}_ep{args.epochs_pretrain}_{args.seed}'
+output_file = f'out_pretrain/{args.data_name}/{_data_tag}_v2{args.view2}_v3{args.view3}_ep{args.epochs_pretrain}_{args.seed}{_enc_suffix}{_lsig_suffix}'
 
 if os.path.exists(output_file):
     print(f"Output file {output_file} already exists. Skipping this run.")
     sys.exit(0)
 
 # Resume checkpoint path for interrupted runs
-resume_ckpt_path = f'out_pretrain/.resume_{args.data_name}_v2{args.view2}_v3{args.view3}_ep{args.epochs_pretrain}_{args.seed}.pth'
+resume_ckpt_path = f'out_pretrain/.resume_{args.data_name}_v2{args.view2}_v3{args.view3}_ep{args.epochs_pretrain}_{args.seed}{_enc_suffix}{_lsig_suffix}.pth'
     
 #
 args.context_len = int(args.data_name.split('_')[3])
@@ -113,7 +129,14 @@ views = ('xt', args.view2, args.view3)
 print(f"Preprocessing views: {views} (logsig_depth={args.logsig_depth})", flush=True)
 preprocess_start_time = time.time()
 
-preprocessed_data = preprocess_data(X_train_intp, X_train_intp, views=views, logsig_depth=args.logsig_depth)
+preprocessed_data = preprocess_data(
+    X_train_intp, X_train_intp, views=views,
+    logsig_depth=args.logsig_depth,
+    logsig_mode=getattr(args, 'logsig_mode', 'stream'),
+    logsig_window_size=getattr(args, 'logsig_window_size', 32),
+    logsig_smoothing=getattr(args, 'logsig_smoothing', 'tukey'),
+    logsig_smooth_param=getattr(args, 'logsig_smooth_param', 0.5),
+)
 X_train_intp_v1, _, _, _ = preprocessed_data['v1']
 X_train_intp_v2, _, _, _ = preprocessed_data['v2']
 X_train_intp_v3, _, _, _ = preprocessed_data['v3']
@@ -158,8 +181,8 @@ scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(encoder_optimizer, mode='
 
 loss_list = []
 best_valid_loss = float('inf')
-best_model_path = f'model_pretrain/{args.data_name}/{args.data_name}_v2{args.view2}_v3{args.view3}_ep{args.epochs_pretrain}_{args.seed}.pth'
-output_file = f'out_pretrain/{args.data_name}/{args.data_name}_v2{args.view2}_v3{args.view3}_ep{args.epochs_pretrain}_{args.seed}'
+best_model_path = f'model_pretrain/{args.data_name}/{args.data_name}_v2{args.view2}_v3{args.view3}_ep{args.epochs_pretrain}_{args.seed}{_enc_suffix}{_lsig_suffix}.pth'
+output_file = f'out_pretrain/{args.data_name}/{args.data_name}_v2{args.view2}_v3{args.view3}_ep{args.epochs_pretrain}_{args.seed}{_enc_suffix}{_lsig_suffix}'
 
 # Early stopping parameters
 patience = 20
