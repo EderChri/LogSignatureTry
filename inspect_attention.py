@@ -42,26 +42,32 @@ args = parse_args()
 if args.pretrain_data_name is None:
     args.pretrain_data_name = args.data_name
 
-args.context_len = int(args.data_name.split('_')[3])
-args.horizon_len = int(args.data_name.split('_')[4])
-
 if args.num_feature > 64:
     args.num_feature = 64
 
-args.num_feature_v2 = get_view_num_features(args.view2, args.num_feature, args.logsig_depth)
-args.num_feature_v3 = get_view_num_features(args.view3, args.num_feature, args.logsig_depth)
+_gt = getattr(args, 'logsig_global_time', False)
+args.num_feature_v2 = get_view_num_features(args.view2, args.num_feature, args.logsig_depth, _gt)
+args.num_feature_v3 = get_view_num_features(args.view3, args.num_feature, args.logsig_depth, _gt)
 
 # ---------------------------------------------------------------------------
 # Data (use test split for inspection)
 # ---------------------------------------------------------------------------
 
 with open(f'preprocessed_data/{args.data_name}.pkl', 'rb') as f:
-    (_, _, _, _,
-     _, _, _, _,
+    (X_tr_raw, _, _, y_train,
+     X_va_raw, _, _, y_val,
      X_te_raw, _, _, y_test) = pickle.load(f)
 
-X_te = torch.tensor(X_te_raw).transpose(1, 2).float()
-y_te = torch.tensor(y_test)
+# Fall back to val or train if test split is empty (pretraining-only datasets)
+for X_raw, y_raw, split in [(X_te_raw, y_test, 'test'),
+                             (X_va_raw, y_val, 'val'),
+                             (X_tr_raw, y_train, 'train')]:
+    if len(X_raw) > 0:
+        print(f'Using {split} split ({len(X_raw)} samples)', flush=True)
+        break
+
+X_te = torch.tensor(X_raw).transpose(1, 2).float()
+y_te = torch.tensor(y_raw)
 
 views = ('xt', args.view2, args.view3)
 _logsig_kw = dict(
@@ -70,6 +76,8 @@ _logsig_kw = dict(
     logsig_window_size=getattr(args, 'logsig_window_size', 32),
     logsig_smoothing=getattr(args, 'logsig_smoothing', 'tukey'),
     logsig_smooth_param=getattr(args, 'logsig_smooth_param', 0.5),
+    logsig_stride=getattr(args, 'logsig_stride', 1),
+    logsig_global_time=getattr(args, 'logsig_global_time', False),
 )
 pre = preprocess_data(X_te, X_te, views=views, **_logsig_kw)
 Xte1, Xte2, Xte3 = pre['v1'][0], pre['v2'][0], pre['v3'][0]
@@ -84,6 +92,8 @@ loader = DataLoader(
 
 pretrain_tag = (f'{args.pretrain_data_name}_v2{args.view2}_v3{args.view3}'
                 f'_ep{args.epochs_pretrain}_{args.seed}')
+if args.encoder_type != 'transformer':
+    pretrain_tag += f'_{args.encoder_type}'
 ckpt = f'model_pretrain/{args.pretrain_data_name}/{pretrain_tag}.pth'
 
 if not os.path.exists(ckpt):
@@ -119,14 +129,7 @@ with torch.no_grad():
         dX = torch.nan_to_num(dX)
         Xf = torch.nan_to_num(Xf)
 
-        # --- encoder forward, manually to capture attn weights ---
-        ht = encoder.transformer_encoder_t(
-             encoder.positional_encoding(encoder.input_layer_t(Xt)))
-        hd = encoder.transformer_encoder_d(
-             encoder.positional_encoding(encoder.input_layer_d(dX)))
-        hf = encoder.transformer_encoder_f(
-             encoder.positional_encoding(encoder.input_layer_f(Xf)))
-
+        ht, hd, hf, _, _, _ = encoder(Xt, dX, Xf)
         _, _, _, enc_attn = encoder.interaction_layer(ht, hd, hf, return_attn=True)
         # enc_attn: [N, L, 3, 3] — mean over batch and time
         enc_attn_sum += enc_attn.mean(dim=(0, 1)).cpu()

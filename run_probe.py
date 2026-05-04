@@ -89,8 +89,9 @@ args.horizon_len = int(args.data_name.split('_')[4])
 if args.num_feature > 64:
     args.num_feature = 64
 
-args.num_feature_v2 = get_view_num_features(args.view2, args.num_feature, args.logsig_depth)
-args.num_feature_v3 = get_view_num_features(args.view3, args.num_feature, args.logsig_depth)
+_gt = getattr(args, 'logsig_global_time', False)
+args.num_feature_v2 = get_view_num_features(args.view2, args.num_feature, args.logsig_depth, _gt)
+args.num_feature_v3 = get_view_num_features(args.view3, args.num_feature, args.logsig_depth, _gt)
 
 # ---------------------------------------------------------------------------
 # Data
@@ -115,6 +116,8 @@ _logsig_kw = dict(
     logsig_window_size=getattr(args, 'logsig_window_size', 32),
     logsig_smoothing=getattr(args, 'logsig_smoothing', 'tukey'),
     logsig_smooth_param=getattr(args, 'logsig_smooth_param', 0.5),
+    logsig_stride=getattr(args, 'logsig_stride', 1),
+    logsig_global_time=getattr(args, 'logsig_global_time', False),
 )
 
 pre_tv = preprocess_data(X_tr, X_va, views=views, **_logsig_kw)

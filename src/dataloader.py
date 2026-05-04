@@ -7,17 +7,11 @@ from typing import Tuple, Optional
 
 
 def normalize(X_train: torch.Tensor, X_test: torch.Tensor, epsilon: float = 1e-8):
-    # Compute mean and std along the N and L dimensions
     mean = X_train.mean(dim=(0, 1), keepdim=True)
-    std = X_train.std(dim=(0, 1), keepdim=True)
-    
-    # Add epsilon to std to avoid division by zero
-    std = std.clamp(min=epsilon)
-    
-    # Normalize train and test data
+    std = X_train.std(dim=(0, 1), keepdim=True).clamp(min=epsilon)
     X_train_norm = (X_train - mean) / std
     X_test_norm = (X_test - mean) / std
-    return X_train_norm, X_test_norm, mean, std  # Return mean and std for potential inverse transform
+    return X_train_norm, X_test_norm, mean, std
 
 
 def add_time_feature(X: torch.Tensor):
@@ -46,7 +40,7 @@ def get_dx(X: torch.Tensor) -> torch.Tensor:
 
 
 def get_xf(X: torch.Tensor) -> torch.Tensor:
-    return torch.abs(fft.fft(X, dim=1))  # Use dim=1 for the sequence dimension
+    return torch.abs(fft.fft(X.contiguous(), dim=1))
 
 
 def _tukey_weights(W: int, alpha: float, dtype, device) -> torch.Tensor:
@@ -82,12 +76,15 @@ def get_logsig(
     window_size: int = 32,
     smoothing: str = 'tukey',
     smooth_param: float = 0.5,
+    stride: int = 1,
+    global_time: bool = False,
 ) -> torch.Tensor:
     """Log signature view of the time-augmented path.
 
     Three modes are supported:
     - 'stream':        Running log-sig of [0, t] at each step t.
                        Output shape: [N, L, C] (position 0 is zero-padded).
+                       stride is ignored in stream mode.
     - 'window':        Log-sig of the sliding window [t-W+1, t] of size W.
     - 'window_smooth': Sliding window with smoothing applied to each window
                        segment before computing the signature.
@@ -100,6 +97,12 @@ def get_logsig(
     All modes prepend a t∈[0,1] time channel (local to each window/path) so
     that single-channel inputs still produce non-trivial signatures.
 
+    Windowed modes const-pad early windows (before the window is full) to
+    window_size:
+      - mode='window' or smoothing='ema': replicate the first sample.
+      - mode='window_smooth' + smoothing='tukey': zero-pad (matches the
+        Tukey taper zeroing out the window edges).
+
     Args:
         X:            [N, L, D]
         depth:        truncation depth
@@ -107,27 +110,50 @@ def get_logsig(
         window_size:  sliding window length W (used for window modes)
         smoothing:    'tukey' | 'ema'  (used for window_smooth mode)
         smooth_param: tapering ratio for tukey or alpha decay for ema
+        stride:       compute a signature every stride steps; output length
+                      is L // stride.  Ignored in stream mode.
+        global_time:  if True, append the global position t/L as an extra
+                      channel, giving the MLP branch a sense of absolute
+                      position without a learned PE.
 
     Returns:
-        [N, L, logsig_channels(D+1, depth)]
+        stream mode:  [N, L,       C(+1)]  where C = logsigdim(D+1, depth)
+        window modes: [N, L//stride, C(+1)]
     """
     N, L, D = X.shape
+    C_sig = logsigdim(D + 1, depth)
+    C = C_sig + 1 if global_time else C_sig
 
     if mode == 'stream':
         t = torch.linspace(0, 1, L, dtype=X.dtype, device=X.device)
         t = t.view(1, L, 1).expand(N, -1, -1)
         X_time = torch.cat([t, X], dim=-1)                    # [N, L, D+1]
-        logsig = log_signature(X_time, depth, stream=True)    # [N, L-1, C]
-        pad = torch.zeros(N, 1, logsig.shape[-1], dtype=X.dtype, device=X.device)
-        return torch.cat([pad, logsig], dim=1)                # [N, L, C]
+        logsig = log_signature(X_time, depth, stream=True)    # [N, L-1, C_sig]
+        pad = torch.zeros(N, 1, C_sig, dtype=X.dtype, device=X.device)
+        result = torch.cat([pad, logsig], dim=1)              # [N, L, C_sig]
+        if global_time:
+            result = torch.cat([result, t], dim=-1)           # [N, L, C_sig+1]
+        return result
 
     # Windowed modes
-    C = logsigdim(D + 1, depth)
-    out = torch.zeros(N, L, C, dtype=X.dtype, device=X.device)
-    for end in range(1, L + 1):
+    positions = range(stride, L + 1, stride) if stride > 1 else range(1, L + 1)
+    L_out = len(range(stride, L + 1, stride)) if stride > 1 else L
+    out = torch.zeros(N, L_out, C, dtype=X.dtype, device=X.device)
+
+    for out_idx, end in enumerate(positions):
         start = max(0, end - window_size)
-        seg = X[:, start:end, :].clone()                      # [N, W, D]
-        W = seg.shape[1]
+        seg = X[:, start:end, :].clone()                      # [N, W_real, D]
+
+        # Const-pad early windows that haven't filled to window_size yet
+        if seg.shape[1] < window_size:
+            needed = window_size - seg.shape[1]
+            if mode == 'window_smooth' and smoothing == 'tukey':
+                pad_seg = torch.zeros(N, needed, D, dtype=X.dtype, device=X.device)
+            else:
+                pad_seg = seg[:, :1, :].expand(-1, needed, -1).clone()
+            seg = torch.cat([pad_seg, seg], dim=1)
+
+        W = seg.shape[1]  # == window_size after padding
 
         if mode == 'window_smooth':
             if smoothing == 'tukey':
@@ -140,16 +166,26 @@ def get_logsig(
         seg_t = torch.linspace(0, 1, W, dtype=X.dtype, device=X.device)
         seg_t = seg_t.view(1, W, 1).expand(N, -1, -1)
         seg_full = torch.cat([seg_t, seg], dim=-1)            # [N, W, D+1]
-        out[:, end - 1, :] = log_signature(seg_full, depth)  # global logsig of window
+        sig_val = log_signature(seg_full, depth)              # [N, C_sig]
+
+        if global_time:
+            t_g = torch.full((N, 1), (end - 1) / max(L - 1, 1),
+                             dtype=X.dtype, device=X.device)
+            sig_val = torch.cat([sig_val, t_g], dim=-1)
+
+        out[:, out_idx, :] = sig_val
+
     return out
 
 
-def get_view_num_features(view: str, num_feature: int, logsig_depth: int) -> int:
+def get_view_num_features(view: str, num_feature: int, logsig_depth: int,
+                          global_time: bool = False) -> int:
     """Input feature dimension produced by the given view transform."""
     if view in ('xt', 'dx', 'xf'):
         return num_feature
     elif view == 'logsig':
-        return logsigdim(num_feature + 1, logsig_depth)
+        c = logsigdim(num_feature + 1, logsig_depth)
+        return c + 1 if global_time else c
     else:
         raise ValueError(f"Unknown view '{view}'. Choose from: xt, dx, xf, logsig")
 
@@ -157,6 +193,7 @@ def get_view_num_features(view: str, num_feature: int, logsig_depth: int) -> int
 def preprocess_data(X_train, X_test, views=('xt', 'dx', 'xf'), logsig_depth=2,
                     logsig_mode='stream', logsig_window_size=32,
                     logsig_smoothing='tukey', logsig_smooth_param=0.5,
+                    logsig_stride=1, logsig_global_time=False,
                     time_as_feature=False):
     """Preprocess training and test data for the requested views.
 
@@ -197,10 +234,12 @@ def preprocess_data(X_train, X_test, views=('xt', 'dx', 'xf'), logsig_depth=2,
         elif view == 'logsig':
             data_tr = get_logsig(X_train_xt, logsig_depth,
                                  mode=logsig_mode, window_size=logsig_window_size,
-                                 smoothing=logsig_smoothing, smooth_param=logsig_smooth_param)
+                                 smoothing=logsig_smoothing, smooth_param=logsig_smooth_param,
+                                 stride=logsig_stride, global_time=logsig_global_time)
             data_te = get_logsig(X_test_xt, logsig_depth,
                                  mode=logsig_mode, window_size=logsig_window_size,
-                                 smoothing=logsig_smoothing, smooth_param=logsig_smooth_param)
+                                 smoothing=logsig_smoothing, smooth_param=logsig_smooth_param,
+                                 stride=logsig_stride, global_time=logsig_global_time)
             data_tr, data_te, mean, std = normalize(data_tr, data_te)
         else:
             raise ValueError(f"Unknown view '{view}'. Choose from: xt, dx, xf, logsig")

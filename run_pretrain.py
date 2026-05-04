@@ -63,12 +63,21 @@ def _logsig_suffix(args) -> str:
     """Suffix encoding logsig mode + window size — empty for default stream mode."""
     mode = getattr(args, 'logsig_mode', 'stream')
     if mode == 'stream':
-        return ''
-    wsiz = getattr(args, 'logsig_window_size', 32)
-    if mode == 'window':
-        return f'_win{wsiz}'
-    smoothing = getattr(args, 'logsig_smoothing', 'tukey')
-    return f'_{smoothing}{wsiz}'   # e.g. _tukey32  _ema16
+        base = ''
+    else:
+        wsiz = getattr(args, 'logsig_window_size', 32)
+        if mode == 'window':
+            base = f'_win{wsiz}'
+        else:
+            smoothing = getattr(args, 'logsig_smoothing', 'tukey')
+            base = f'_{smoothing}{wsiz}'   # e.g. _tukey32  _ema16
+    stride = getattr(args, 'logsig_stride', 1)
+    gt     = getattr(args, 'logsig_global_time', False)
+    if stride > 1:
+        base += f'_s{stride}'
+    if gt:
+        base += '_gt'
+    return base
 
 _lsig_suffix = _logsig_suffix(args)
 
@@ -136,6 +145,8 @@ preprocessed_data = preprocess_data(
     logsig_window_size=getattr(args, 'logsig_window_size', 32),
     logsig_smoothing=getattr(args, 'logsig_smoothing', 'tukey'),
     logsig_smooth_param=getattr(args, 'logsig_smooth_param', 0.5),
+    logsig_stride=getattr(args, 'logsig_stride', 1),
+    logsig_global_time=getattr(args, 'logsig_global_time', False),
 )
 X_train_intp_v1, _, _, _ = preprocessed_data['v1']
 X_train_intp_v2, _, _, _ = preprocessed_data['v2']
@@ -168,8 +179,9 @@ summary_file = f'out_pretrain/{args.data_name}/final_pretrain_summary.tsv'
 if args.num_feature > 64:
     args.num_feature = 64
 
-args.num_feature_v2 = get_view_num_features(args.view2, args.num_feature, args.logsig_depth)
-args.num_feature_v3 = get_view_num_features(args.view3, args.num_feature, args.logsig_depth)
+_gt = getattr(args, 'logsig_global_time', False)
+args.num_feature_v2 = get_view_num_features(args.view2, args.num_feature, args.logsig_depth, _gt)
+args.num_feature_v3 = get_view_num_features(args.view3, args.num_feature, args.logsig_depth, _gt)
 
 if torch.cuda.device_count() > 1:
     encoder = Encoder(args)

@@ -185,3 +185,6 @@ harth
 har70plus
 SleepEEg
 logs
+*.pdf
+*.png
+*.pkl

@@ -51,10 +51,87 @@ class InteractionLayer(nn.Module):
             return ht_i, hd_i, hf_i, attn_weights.view(N, L, 3, 3)
         return ht_i, hd_i, hf_i
 
-        
+
+class InteractionLayerStridedLogsig(nn.Module):
+    """Cross-attention interaction layer for when exactly one view is strided.
+
+    Full-resolution views (num_views - 1) are at [N, L, D].
+    The strided view (strided_idx) is at [N, L_s, D] where L_s = L // stride.
+
+    Three steps:
+      1. Timestep-wise self-attention among full-res views (identical to
+         InteractionLayerNView with V_full views).
+      2. Each full-res view cross-attends to the strided view
+         (Q=[N,L,D], K/V=[N,L_s,D]) — pulls path-geometry context into
+         every full-res timestep.
+      3. Strided view cross-attends to the mean of the updated full-res views
+         (Q=[N,L_s,D], K/V=[N,L,D]) — anchors each window signature to the
+         surrounding temporal context.
+
+    Returns a list of num_views tensors in the original view order:
+      full-res views still at [N, L, D]; strided view still at [N, L_s, D].
+    """
+    def __init__(self, hidden_size: int, num_heads: int,
+                 num_views: int, strided_idx: int):
+        super().__init__()
+        self.num_views   = num_views
+        self.strided_idx = strided_idx
+
+        self.full_mha    = nn.MultiheadAttention(hidden_size, num_heads, batch_first=True)
+        self.full_norm   = nn.LayerNorm(hidden_size)
+
+        self.to_sig_mha  = nn.MultiheadAttention(hidden_size, num_heads, batch_first=True)
+        self.to_sig_norm = nn.LayerNorm(hidden_size)
+
+        self.from_sig_mha  = nn.MultiheadAttention(hidden_size, num_heads, batch_first=True)
+        self.from_sig_norm = nn.LayerNorm(hidden_size)
+
+    def forward(self, *hs):
+        full_hs = [h for i, h in enumerate(hs) if i != self.strided_idx]
+        strided = hs[self.strided_idx]                        # [N, L_s, D]
+
+        N, L, D = full_hs[0].size()
+        V_full  = len(full_hs)
+
+        # Step 1: timestep-wise cross-view self-attention among full-res views
+        h = torch.stack(full_hs, dim=2).view(N * L, V_full, D)
+        attn_out, _ = self.full_mha(h, h, h)
+        h = self.full_norm(h + attn_out).view(N, L, V_full, D)
+        full_res = [h[:, :, i, :] for i in range(V_full)]
+
+        # Step 2: each full-res view attends to strided logsig
+        cross_full = []
+        for hf in full_res:
+            out, _ = self.to_sig_mha(hf, strided, strided)   # Q=[N,L,D], K/V=[N,L_s,D]
+            cross_full.append(self.to_sig_norm(hf + out))
+
+        # Step 3: strided logsig attends to mean of updated full-res views
+        full_mean = torch.stack(cross_full, dim=0).mean(dim=0)  # [N, L, D]
+        out, _ = self.from_sig_mha(strided, full_mean, full_mean)
+        strided_res = self.from_sig_norm(strided + out)
+
+        # Reassemble in original view order
+        results  = [None] * self.num_views
+        full_it  = iter(cross_full)
+        for i in range(self.num_views):
+            results[i] = strided_res if i == self.strided_idx else next(full_it)
+        return results
+
+
 def _uses_mlp_for_view(encoder_type: str, view: str) -> bool:
     """Return True if this view should use LogSigMLP instead of a transformer."""
     return encoder_type == 'mlp_logsig' and view == 'logsig'
+
+
+def _use_last_pooling(encoder_type: str, view: str, logsig_mode: str = 'stream') -> bool:
+    """True → h[:, -1, :];  False → h.mean(dim=1).
+
+    last-position pooling is only meaningful for stream mode, where position
+    L-1 holds the cumulative log-signature of the entire path.  In window/
+    window_smooth modes every position carries a local window signature and
+    no single position is globally privileged, so mean pooling is used instead.
+    """
+    return encoder_type == 'mlp_logsig' and view == 'logsig' and logsig_mode == 'stream'
 
 
 def _pool(h: torch.Tensor, use_last: bool) -> torch.Tensor:
@@ -92,11 +169,16 @@ class Encoder(nn.Module):
     """
     def __init__(self, args):
         super().__init__()
-        encoder_type = getattr(args, 'encoder_type', 'transformer')
-        self.view2 = args.view2
-        self.view3 = args.view3
-        self._v2_mlp = _uses_mlp_for_view(encoder_type, args.view2)
-        self._v3_mlp = _uses_mlp_for_view(encoder_type, args.view3)
+        encoder_type  = getattr(args, 'encoder_type', 'transformer')
+        logsig_mode   = getattr(args, 'logsig_mode',  'stream')
+        logsig_stride = getattr(args, 'logsig_stride', 1)
+        self.view2    = args.view2
+        self.view3    = args.view3
+        self._v2_mlp  = _uses_mlp_for_view(encoder_type, args.view2)
+        self._v3_mlp  = _uses_mlp_for_view(encoder_type, args.view3)
+        # Pooling: last-position only for stream+MLP; mean for windowed or transformer
+        self._v2_last = _use_last_pooling(encoder_type, args.view2, logsig_mode)
+        self._v3_last = _use_last_pooling(encoder_type, args.view3, logsig_mode)
 
         self.positional_encoding = PositionalEncoding(args.num_embedding, args.dropout)
 
@@ -129,7 +211,20 @@ class Encoder(nn.Module):
                                            nhead=args.num_head, dropout=args.dropout, batch_first=True),
                 args.num_layers)
 
-        self.interaction_layer = InteractionLayer(args.num_embedding, args.num_head)
+        # Interaction layer: strided cross-attention when stride>1 in windowed mode
+        _windowed = logsig_mode in ('window', 'window_smooth')
+        if logsig_stride > 1 and _windowed:
+            _strided = [idx for idx, v in enumerate([args.view2, args.view3], start=1)
+                        if v == 'logsig']
+            if len(_strided) > 1:
+                raise ValueError("Strided interaction with multiple logsig views is not supported")
+            if _strided:
+                self.interaction_layer = InteractionLayerStridedLogsig(
+                    args.num_embedding, args.num_head, 3, _strided[0])
+            else:
+                self.interaction_layer = InteractionLayer(args.num_embedding, args.num_head)
+        else:
+            self.interaction_layer = InteractionLayer(args.num_embedding, args.num_head)
         self.output_layer_t = nn.Sequential(
             nn.Linear(args.num_embedding * 2, args.num_hidden),
             nn.LayerNorm(args.num_hidden), nn.ReLU(), nn.Dropout(args.dropout),
@@ -163,11 +258,9 @@ class Encoder(nn.Module):
 
         ht_i, hd_i, hf_i = self.interaction_layer(ht, hd, hf)
 
-        zt = self.output_layer_t(torch.cat([ht.mean(dim=1), ht_i.mean(dim=1)], dim=-1))
-        # For logsig, position -1 is the global log signature; mean pooling would
-        # dilute it with near-empty early prefix sigs.
-        zd = self.output_layer_d(torch.cat([_pool(hd, self._v2_mlp), _pool(hd_i, self._v2_mlp)], dim=-1))
-        zf = self.output_layer_f(torch.cat([_pool(hf, self._v3_mlp), _pool(hf_i, self._v3_mlp)], dim=-1))
+        zt = self.output_layer_t(torch.cat([ht.mean(dim=1),               ht_i.mean(dim=1)], dim=-1))
+        zd = self.output_layer_d(torch.cat([_pool(hd,  self._v2_last), _pool(hd_i, self._v2_last)], dim=-1))
+        zf = self.output_layer_f(torch.cat([_pool(hf,  self._v3_last), _pool(hf_i, self._v3_last)], dim=-1))
 
         return ht, hd, hf, zt, zd, zf
 
@@ -203,8 +296,21 @@ class Classifier(nn.Module):
                 self.self_attention = SelfAttention(args.num_hidden)
 
         elif self.args.feature == 'hidden':
-            ## interaction
-            self.interaction_layer = InteractionLayer(args.num_embedding, args.num_head)
+            _enc_type     = getattr(args, 'encoder_type', 'transformer')
+            _logsig_mode  = getattr(args, 'logsig_mode',  'stream')
+            _logsig_stride = getattr(args, 'logsig_stride', 1)
+            _windowed = _logsig_mode in ('window', 'window_smooth')
+            if _logsig_stride > 1 and _windowed:
+                _strided = [idx for idx, v in enumerate([args.view2, args.view3], start=1)
+                            if v == 'logsig']
+                if len(_strided) > 1:
+                    raise ValueError("Strided interaction with multiple logsig views not supported")
+                self.interaction_layer = (
+                    InteractionLayerStridedLogsig(args.num_embedding, args.num_head, 3, _strided[0])
+                    if _strided else InteractionLayer(args.num_embedding, args.num_head)
+                )
+            else:
+                self.interaction_layer = InteractionLayer(args.num_embedding, args.num_head)
             
             ## output
             self.output_layer_t = nn.Sequential(
@@ -256,9 +362,10 @@ class Classifier(nn.Module):
             else:
                 ht_i, hd_i, hf_i = ht, hd, hf
             
-            enc_type = getattr(self.args, 'encoder_type', 'transformer')
-            v2_last = _uses_mlp_for_view(enc_type, getattr(self.args, 'view2', ''))
-            v3_last = _uses_mlp_for_view(enc_type, getattr(self.args, 'view3', ''))
+            enc_type    = getattr(self.args, 'encoder_type', 'transformer')
+            logsig_mode = getattr(self.args, 'logsig_mode',  'stream')
+            v2_last = _use_last_pooling(enc_type, getattr(self.args, 'view2', ''), logsig_mode)
+            v3_last = _use_last_pooling(enc_type, getattr(self.args, 'view3', ''), logsig_mode)
             zt = self.output_layer_t(torch.cat([ht.mean(dim=1), ht_i.mean(dim=1)], dim=-1))
             zd = self.output_layer_d(torch.cat([_pool(hd, v2_last), _pool(hd_i, v2_last)], dim=-1))
             zf = self.output_layer_f(torch.cat([_pool(hf, v3_last), _pool(hf_i, v3_last)], dim=-1))

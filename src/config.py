@@ -6,7 +6,7 @@ def get_args_parser():
 
     # Setup
     parser.add_argument('--seed', default=0, type=int)
-    parser.add_argument('--data_name', default='BasicMotions_256_00', type=str)
+    parser.add_argument('--data_name', default='_DA_HARTH_256_00', type=str)
     parser.add_argument('--num_feature', default=6, type=int)
     parser.add_argument('--num_target', default=4, type=int)
 
@@ -27,7 +27,7 @@ def get_args_parser():
     parser.add_argument('--feature', default='hidden', type=str)
 
     # Training parameters
-    parser.add_argument('--epochs_pretrain', default=200, type=int)
+    parser.add_argument('--epochs_pretrain', default=2, type=int)
     parser.add_argument('--epochs_finetune', default=100, type=int)
     parser.add_argument('--lr', default=1e-3, type=float)
     parser.add_argument('--weight_decay', default=1e-5, type=float)
@@ -39,6 +39,11 @@ def get_args_parser():
     # Cross-dataset transfer: pretrain on one dataset, finetune on another
     parser.add_argument('--pretrain_data_name', default=None, type=str,
                         help='data_name of the pretrained model; defaults to --data_name')
+
+    # Which finetune modes to run
+    parser.add_argument('--run_modes', default='finetune,freeze,baseline', type=str,
+                        help='Comma-separated subset of finetune modes to run: '
+                             'finetune, freeze, baseline (default: all three)')
 
     # View configuration (view1 is always 'xt')
     parser.add_argument('--view2', default='dx', type=str,
@@ -64,6 +69,14 @@ def get_args_parser():
                              'tukey = tapered-cosine window weighting; ema = exponential moving average')
     logsig.add_argument('--logsig_smooth_param', default=0.5, type=float,
                         help='Tukey alpha tapering ratio (0=rect, 1=Hann) or EMA decay alpha')
+    logsig.add_argument('--logsig_global_time', action='store_true',
+                        help='Append global t∈[0,1] as an extra channel to the logsig output '
+                             '(gives windowed+MLP branch a sense of absolute position)')
+    logsig.add_argument('--logsig_stride', default=1, type=int,
+                        help='Compute windowed log-sig every stride steps (stride=1 = every step). '
+                             'stride>1 activates InteractionLayerStridedLogsig in place of the '
+                             'standard timestep-wise interaction layer. Only meaningful for '
+                             'window/window_smooth modes.')
 
     return parser
 

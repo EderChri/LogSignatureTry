@@ -14,7 +14,9 @@ Key differences from src/model.py:
 import torch
 import torch.nn as nn
 
-from .model import PositionalEncoding, LogSigMLP, SelfAttention, _uses_mlp_for_view, _pool
+from .model import (PositionalEncoding, LogSigMLP, SelfAttention,
+                    _uses_mlp_for_view, _use_last_pooling, _pool,
+                    InteractionLayerStridedLogsig)
 
 
 # ---------------------------------------------------------------------------
@@ -102,10 +104,14 @@ class EncoderNView(nn.Module):
         assert len(views) >= 2,             "Need at least 2 views"
 
         encoder_type   = getattr(args, 'encoder_type', 'transformer')
+        logsig_mode    = getattr(args, 'logsig_mode',  'stream')
+        logsig_stride  = getattr(args, 'logsig_stride', 1)
         self.views     = list(views)
         self.num_views = len(views)
-        # view 0 (xt) never uses MLP even with encoder_type='mlp_logsig'
-        self._use_last = [False] + [_uses_mlp_for_view(encoder_type, v) for v in views[1:]]
+        # view 0 (xt) never uses MLP; pooling is last-position only for stream+MLP
+        self._use_mlp  = [False] + [_uses_mlp_for_view(encoder_type, v) for v in views[1:]]
+        self._use_last = [False] + [_use_last_pooling(encoder_type, v, logsig_mode)
+                                    for v in views[1:]]
 
         branch_kw = dict(embedding_dim=args.num_embedding, hidden_dim=args.num_hidden,
                          num_head=args.num_head, num_layers=args.num_layers,
@@ -113,14 +119,27 @@ class EncoderNView(nn.Module):
 
         self.branches = nn.ModuleList([
             LogSigMLP(in_dims[i], args.num_embedding, args.num_hidden, args.dropout)
-            if self._use_last[i] else
+            if self._use_mlp[i] else
             _TransformerBranch(in_dims[i], **branch_kw)
             for i in range(self.num_views)
         ])
 
-        self.interaction_layer = InteractionLayerNView(
-            args.num_embedding, args.num_head, self.num_views
-        )
+        # Interaction layer: cross-attention when stride>1 in windowed mode
+        _windowed = logsig_mode in ('window', 'window_smooth')
+        if logsig_stride > 1 and _windowed:
+            _strided = [i for i, v in enumerate(views) if v == 'logsig']
+            if len(_strided) > 1:
+                raise ValueError("Strided interaction with multiple logsig views not supported")
+            self.interaction_layer = (
+                InteractionLayerStridedLogsig(args.num_embedding, args.num_head,
+                                              self.num_views, _strided[0])
+                if _strided else
+                InteractionLayerNView(args.num_embedding, args.num_head, self.num_views)
+            )
+        else:
+            self.interaction_layer = InteractionLayerNView(
+                args.num_embedding, args.num_head, self.num_views
+            )
 
         self.output_layers = nn.ModuleList([
             nn.Sequential(
@@ -174,12 +193,27 @@ class ClassifierNView(nn.Module):
         self.views     = list(views)
         self.num_views = len(views)
         encoder_type   = getattr(args, 'encoder_type', 'transformer')
-        self._use_last = [False] + [_uses_mlp_for_view(encoder_type, v) for v in views[1:]]
+        logsig_mode    = getattr(args, 'logsig_mode',  'stream')
+        logsig_stride  = getattr(args, 'logsig_stride', 1)
+        self._use_last = [False] + [_use_last_pooling(encoder_type, v, logsig_mode)
+                                    for v in views[1:]]
 
         if args.feature == 'hidden':
-            self.interaction_layer = InteractionLayerNView(
-                args.num_embedding, args.num_head, self.num_views
-            )
+            _windowed = logsig_mode in ('window', 'window_smooth')
+            if logsig_stride > 1 and _windowed:
+                _strided = [i for i, v in enumerate(views) if v == 'logsig']
+                if len(_strided) > 1:
+                    raise ValueError("Strided interaction with multiple logsig views not supported")
+                self.interaction_layer = (
+                    InteractionLayerStridedLogsig(args.num_embedding, args.num_head,
+                                                  self.num_views, _strided[0])
+                    if _strided else
+                    InteractionLayerNView(args.num_embedding, args.num_head, self.num_views)
+                )
+            else:
+                self.interaction_layer = InteractionLayerNView(
+                    args.num_embedding, args.num_head, self.num_views
+                )
             self.output_layers = nn.ModuleList([
                 nn.Sequential(
                     nn.Linear(args.num_embedding * 2, args.num_hidden),
