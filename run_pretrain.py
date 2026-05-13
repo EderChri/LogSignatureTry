@@ -73,13 +73,18 @@ def _logsig_suffix(args) -> str:
             base = f'_{smoothing}{wsiz}'   # e.g. _tukey32  _ema16
     stride = getattr(args, 'logsig_stride', 1)
     gt     = getattr(args, 'logsig_global_time', False)
+    pool   = getattr(args, 'logsig_pool', 'auto')
     if stride > 1:
         base += f'_s{stride}'
     if gt:
         base += '_gt'
+    if pool != 'auto':
+        base += f'_p{pool}'   # e.g. _plast  _pmean
     return base
 
 _lsig_suffix = _logsig_suffix(args)
+_il_suffix = '' if getattr(args, 'interaction_type', 'attention') == 'attention' \
+             else f'_il{args.interaction_type.replace("_", "")}'
 
 print(
     f"Starting pretrain: data={args.data_name}, encoder={args.encoder_type}, "
@@ -90,14 +95,14 @@ print(
 
 ## Check if output already exists
 _data_tag = f'{args.data_name}-full' if args.full_training else args.data_name
-output_file = f'out_pretrain/{args.data_name}/{_data_tag}_v2{args.view2}_v3{args.view3}_ep{args.epochs_pretrain}_{args.seed}{_enc_suffix}{_lsig_suffix}'
+output_file = f'out_pretrain/{args.data_name}/{_data_tag}_v2{args.view2}_v3{args.view3}_ep{args.epochs_pretrain}_{args.seed}{_enc_suffix}{_lsig_suffix}{_il_suffix}'
 
 if os.path.exists(output_file):
     print(f"Output file {output_file} already exists. Skipping this run.")
     sys.exit(0)
 
 # Resume checkpoint path for interrupted runs
-resume_ckpt_path = f'out_pretrain/.resume_{args.data_name}_v2{args.view2}_v3{args.view3}_ep{args.epochs_pretrain}_{args.seed}{_enc_suffix}{_lsig_suffix}.pth'
+resume_ckpt_path = f'out_pretrain/.resume_{args.data_name}_v2{args.view2}_v3{args.view3}_ep{args.epochs_pretrain}_{args.seed}{_enc_suffix}{_lsig_suffix}{_il_suffix}.pth'
     
 #
 args.context_len = int(args.data_name.split('_')[3])
@@ -138,15 +143,23 @@ views = ('xt', args.view2, args.view3)
 print(f"Preprocessing views: {views} (logsig_depth={args.logsig_depth})", flush=True)
 preprocess_start_time = time.time()
 
+_ls_mode   = getattr(args, 'logsig_mode', 'stream')
+_ls_wsiz   = getattr(args, 'logsig_window_size', 32)
+_ls_smooth = getattr(args, 'logsig_smoothing', 'tukey')
+_ls_sp     = getattr(args, 'logsig_smooth_param', 0.5)
+_ls_stride = getattr(args, 'logsig_stride', 1)
+_ls_gt     = getattr(args, 'logsig_global_time', False)
+_logsig_cache_key = (
+    f'{args.data_name}_d{args.logsig_depth}_{_ls_mode}'
+    f'_w{_ls_wsiz}_s{_ls_stride}_{_ls_smooth}_sp{_ls_sp}_gt{int(_ls_gt)}'
+)
 preprocessed_data = preprocess_data(
     X_train_intp, X_train_intp, views=views,
     logsig_depth=args.logsig_depth,
-    logsig_mode=getattr(args, 'logsig_mode', 'stream'),
-    logsig_window_size=getattr(args, 'logsig_window_size', 32),
-    logsig_smoothing=getattr(args, 'logsig_smoothing', 'tukey'),
-    logsig_smooth_param=getattr(args, 'logsig_smooth_param', 0.5),
-    logsig_stride=getattr(args, 'logsig_stride', 1),
-    logsig_global_time=getattr(args, 'logsig_global_time', False),
+    logsig_mode=_ls_mode, logsig_window_size=_ls_wsiz,
+    logsig_smoothing=_ls_smooth, logsig_smooth_param=_ls_sp,
+    logsig_stride=_ls_stride, logsig_global_time=_ls_gt,
+    logsig_cache_key=_logsig_cache_key,
 )
 X_train_intp_v1, _, _, _ = preprocessed_data['v1']
 X_train_intp_v2, _, _, _ = preprocessed_data['v2']
@@ -188,13 +201,26 @@ if torch.cuda.device_count() > 1:
     encoder = nn.DataParallel(encoder).to(device)
 else:
     encoder = Encoder(args).to(device)
+    if hasattr(torch, 'compile'):
+        try:
+            encoder = torch.compile(encoder)
+            print('torch.compile applied to encoder', flush=True)
+        except Exception as e:
+            print(f'torch.compile skipped: {e}', flush=True)
+if getattr(args, 'random_attn_init', False):
+    for m in encoder.modules():
+        if isinstance(m, torch.nn.MultiheadAttention):
+            torch.nn.init.normal_(m.in_proj_weight, std=1.0)
+            if m.out_proj.weight is not None:
+                torch.nn.init.normal_(m.out_proj.weight, std=1.0)
+    print('random_attn_init: MHA projection weights reinitialised with N(0,1)', flush=True)
 encoder_optimizer = torch.optim.Adam(encoder.parameters(), lr=args.lr, weight_decay=args.weight_decay)
 scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(encoder_optimizer, mode='min', factor=0.5, patience=10)
 
 loss_list = []
 best_valid_loss = float('inf')
-best_model_path = f'model_pretrain/{args.data_name}/{args.data_name}_v2{args.view2}_v3{args.view3}_ep{args.epochs_pretrain}_{args.seed}{_enc_suffix}{_lsig_suffix}.pth'
-output_file = f'out_pretrain/{args.data_name}/{args.data_name}_v2{args.view2}_v3{args.view3}_ep{args.epochs_pretrain}_{args.seed}{_enc_suffix}{_lsig_suffix}'
+best_model_path = f'model_pretrain/{args.data_name}/{args.data_name}_v2{args.view2}_v3{args.view3}_ep{args.epochs_pretrain}_{args.seed}{_enc_suffix}{_lsig_suffix}{_il_suffix}.pth'
+output_file = f'out_pretrain/{args.data_name}/{args.data_name}_v2{args.view2}_v3{args.view3}_ep{args.epochs_pretrain}_{args.seed}{_enc_suffix}{_lsig_suffix}{_il_suffix}'
 
 # Early stopping parameters
 patience = 20
@@ -272,6 +298,16 @@ for epoch in range(epoch_start, args.epochs_pretrain + 1):
     else:
         early_stop_counter += 1
     
+    # Save named epoch checkpoint (for attention inspection / learning-curve analysis)
+    save_every = getattr(args, 'save_every', 0)
+    if save_every > 0 and epoch % save_every == 0:
+        eckpt_dir = f'model_pretrain/{args.data_name}/epoch_ckpts'
+        os.makedirs(eckpt_dir, exist_ok=True)
+        run_tag = os.path.basename(best_model_path).replace('.pth', '')
+        eckpt = f'{eckpt_dir}/{run_tag}_ep{epoch}.pth'
+        state = encoder.module.state_dict() if isinstance(encoder, (nn.DataParallel, nn.parallel.DistributedDataParallel)) else encoder.state_dict()
+        torch.save({'epoch': epoch, 'encoder_state_dict': state, 'args': args}, eckpt)
+
     # Save resume checkpoint after each epoch for safe interruption
     os.makedirs(os.path.dirname(resume_ckpt_path), exist_ok=True)
     torch.save({

@@ -84,13 +84,18 @@ def _logsig_suffix(args) -> str:
             base = f'_{smoothing}{wsiz}'
     stride = getattr(args, 'logsig_stride', 1)
     gt     = getattr(args, 'logsig_global_time', False)
+    pool   = getattr(args, 'logsig_pool', 'auto')
     if stride > 1:
         base += f'_s{stride}'
     if gt:
         base += '_gt'
+    if pool != 'auto':
+        base += f'_p{pool}'
     return base
 
 _lsig_suffix = _logsig_suffix(args)
+_il_suffix = '' if getattr(args, 'interaction_type', 'attention') == 'attention' \
+             else f'_il{args.interaction_type.replace("_", "")}'
 
 # Resolve pretrained model source dataset (defaults to the finetune dataset)
 if args.pretrain_data_name is None:
@@ -168,7 +173,7 @@ _gt = getattr(args, 'logsig_global_time', False)
 args.num_feature_v2 = get_view_num_features(args.view2, args.num_feature, args.logsig_depth, _gt)
 args.num_feature_v3 = get_view_num_features(args.view3, args.num_feature, args.logsig_depth, _gt)
 
-pretrain_tag = f'{args.pretrain_data_name}_v2{args.view2}_v3{args.view3}_ep{args.epochs_pretrain}_{args.seed}{_enc_suffix}{_lsig_suffix}'
+pretrain_tag = f'{args.pretrain_data_name}_v2{args.view2}_v3{args.view3}_ep{args.epochs_pretrain}_{args.seed}{_enc_suffix}{_lsig_suffix}{_il_suffix}'
 best_model_path = f'model_pretrain/{args.pretrain_data_name}/{pretrain_tag}.pth'
 
 ##

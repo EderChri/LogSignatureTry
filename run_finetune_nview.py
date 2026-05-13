@@ -78,10 +78,13 @@ def _logsig_suffix(args) -> str:
             base = f'_{smoothing}{wsiz}'
     stride = getattr(args, 'logsig_stride', 1)
     gt     = getattr(args, 'logsig_global_time', False)
+    pool   = getattr(args, 'logsig_pool', 'auto')
     if stride > 1:
         base += f'_s{stride}'
     if gt:
         base += '_gt'
+    if pool != 'auto':
+        base += f'_p{pool}'
     return base
 
 

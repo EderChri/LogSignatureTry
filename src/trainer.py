@@ -71,7 +71,7 @@ def train(args, encoder, clf, encoder_optimizer, clf_optimizer, loader, mode='pr
     total_loss_c = 0
     total_samples = 0
     
-    pbar = tqdm(loader, desc=f"Training ({mode})", disable=_tqdm_disabled())
+    pbar = tqdm(loader, desc=f"Training ({mode})", disable=_tqdm_disabled(), dynamic_ncols=True)
     for batch in pbar:      
         xt, dx, xf, xt_aug, dx_aug, xf_aug, y = [t.float().to(device) for t in batch]
         
@@ -147,7 +147,7 @@ def test(args, encoder, clf, loader, mode='pretrain', device='cuda'):
     total_samples = 0
     
     with torch.no_grad():
-        pbar = tqdm(loader, desc=f"Testing ({mode})", disable=_tqdm_disabled())
+        pbar = tqdm(loader, desc=f"Testing ({mode})", disable=_tqdm_disabled(), dynamic_ncols=True)
         for batch in pbar:      
             xt, dx, xf, xt_aug, dx_aug, xf_aug, y = [t.float().to(device) for t in batch]
 

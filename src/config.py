@@ -24,10 +24,26 @@ def get_args_parser():
     parser.add_argument('--num_head', default=4, type=int)
     parser.add_argument('--num_layers', default=3, type=int)
     parser.add_argument('--dropout', default=0.2, type=float)
+    parser.add_argument('--no_interaction_residual', action='store_true',
+                        help='Remove the residual connection in InteractionLayer, forcing '
+                             'all information to flow through cross-view attention')
+    parser.add_argument('--interaction_type', default='attention', type=str,
+                        choices=['attention', 'view_embed', 'bilinear'],
+                        help='InteractionLayer variant: '
+                             'attention (default, standard shared-W_k MHA), '
+                             'view_embed (learnable per-view offset added before MHA), '
+                             'bilinear (asymmetric per-pair W_ij bilinear score)')
     parser.add_argument('--feature', default='hidden', type=str)
 
     # Training parameters
+    parser.add_argument('--random_attn_init', action='store_true',
+                        help='Reinitialise MHA projection weights with N(0,1) to break '
+                             'uniform attention at t=0 (diagnostic use)')
     parser.add_argument('--epochs_pretrain', default=2, type=int)
+    parser.add_argument('--save_every', default=0, type=int,
+                        help='Save a named epoch checkpoint every N pretrain epochs '
+                             '(0 = disabled). Checkpoints go to '
+                             'model_pretrain/{dataset}/epoch_ckpts/{tag}_ep{e}.pth')
     parser.add_argument('--epochs_finetune', default=100, type=int)
     parser.add_argument('--lr', default=1e-3, type=float)
     parser.add_argument('--weight_decay', default=1e-5, type=float)
@@ -77,6 +93,12 @@ def get_args_parser():
                              'stride>1 activates InteractionLayerStridedLogsig in place of the '
                              'standard timestep-wise interaction layer. Only meaningful for '
                              'window/window_smooth modes.')
+    logsig.add_argument('--logsig_pool', default='auto', type=str,
+                        choices=['auto', 'last', 'mean'],
+                        help='Pooling over the logsig time dimension after the encoder branch. '
+                             'auto (default): last-token for mlp_logsig+stream, mean otherwise. '
+                             'last: always last-token for logsig views (override for ablation). '
+                             'mean: always mean-pool for logsig views (override for ablation).')
 
     return parser
 

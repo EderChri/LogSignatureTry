@@ -71,7 +71,7 @@ def train_nview(args, encoder, clf, encoder_optimizer, clf_optimizer,
 
     total_loss = total_loss_c = total_samples = 0
 
-    pbar = tqdm(loader, desc=f"Training ({mode})", disable=_tqdm_disabled())
+    pbar = tqdm(loader, desc=f"Training ({mode})", disable=_tqdm_disabled(), dynamic_ncols=True)
     for batch in pbar:
         batch      = [t.float().to(device) for t in batch]
         views_orig = batch[:num_views]
@@ -127,7 +127,7 @@ def test_nview(args, encoder, clf, loader, mode='pretrain', device='cuda'):
     total_loss = total_loss_c = total_samples = 0
 
     with torch.no_grad():
-        pbar = tqdm(loader, desc=f"Testing ({mode})", disable=_tqdm_disabled())
+        pbar = tqdm(loader, desc=f"Testing ({mode})", disable=_tqdm_disabled(), dynamic_ncols=True)
         for batch in pbar:
             batch      = [t.float().to(device) for t in batch]
             views_orig = batch[:num_views]

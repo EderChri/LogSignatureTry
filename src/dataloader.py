@@ -1,3 +1,4 @@
+import os
 import torch
 import torch.fft as fft
 import torchcde
@@ -194,7 +195,8 @@ def preprocess_data(X_train, X_test, views=('xt', 'dx', 'xf'), logsig_depth=2,
                     logsig_mode='stream', logsig_window_size=32,
                     logsig_smoothing='tukey', logsig_smooth_param=0.5,
                     logsig_stride=1, logsig_global_time=False,
-                    time_as_feature=False):
+                    time_as_feature=False,
+                    logsig_cache_key=None):
     """Preprocess training and test data for the requested views.
 
     Args:
@@ -232,14 +234,30 @@ def preprocess_data(X_train, X_test, views=('xt', 'dx', 'xf'), logsig_depth=2,
                 data_tr = add_time_feature(data_tr)
                 data_te = add_time_feature(data_te)
         elif view == 'logsig':
-            data_tr = get_logsig(X_train_xt, logsig_depth,
-                                 mode=logsig_mode, window_size=logsig_window_size,
-                                 smoothing=logsig_smoothing, smooth_param=logsig_smooth_param,
-                                 stride=logsig_stride, global_time=logsig_global_time)
-            data_te = get_logsig(X_test_xt, logsig_depth,
-                                 mode=logsig_mode, window_size=logsig_window_size,
-                                 smoothing=logsig_smoothing, smooth_param=logsig_smooth_param,
-                                 stride=logsig_stride, global_time=logsig_global_time)
+            _logsig_kw = dict(
+                depth=logsig_depth, mode=logsig_mode,
+                window_size=logsig_window_size, smoothing=logsig_smoothing,
+                smooth_param=logsig_smooth_param, stride=logsig_stride,
+                global_time=logsig_global_time,
+            )
+            if logsig_cache_key:
+                _cdir = 'preprocessed_data/.logsig_cache'
+                os.makedirs(_cdir, exist_ok=True)
+                _ctr = f'{_cdir}/{logsig_cache_key}_train.pt'
+                _cte = f'{_cdir}/{logsig_cache_key}_test.pt'
+                if os.path.exists(_ctr) and os.path.exists(_cte):
+                    print(f'[logsig cache hit] {_ctr}', flush=True)
+                    data_tr = torch.load(_ctr, weights_only=True)
+                    data_te = torch.load(_cte, weights_only=True)
+                else:
+                    print(f'[logsig cache miss — computing] {_ctr}', flush=True)
+                    data_tr = get_logsig(X_train_xt, **_logsig_kw)
+                    data_te = get_logsig(X_test_xt,  **_logsig_kw)
+                    torch.save(data_tr, _ctr)
+                    torch.save(data_te, _cte)
+            else:
+                data_tr = get_logsig(X_train_xt, **_logsig_kw)
+                data_te = get_logsig(X_test_xt,  **_logsig_kw)
             data_tr, data_te, mean, std = normalize(data_tr, data_te)
         else:
             raise ValueError(f"Unknown view '{view}'. Choose from: xt, dx, xf, logsig")

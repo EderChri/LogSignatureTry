@@ -106,11 +106,11 @@ class EncoderNView(nn.Module):
         encoder_type   = getattr(args, 'encoder_type', 'transformer')
         logsig_mode    = getattr(args, 'logsig_mode',  'stream')
         logsig_stride  = getattr(args, 'logsig_stride', 1)
+        pool_override  = getattr(args, 'logsig_pool',   'auto')
         self.views     = list(views)
         self.num_views = len(views)
-        # view 0 (xt) never uses MLP; pooling is last-position only for stream+MLP
         self._use_mlp  = [False] + [_uses_mlp_for_view(encoder_type, v) for v in views[1:]]
-        self._use_last = [False] + [_use_last_pooling(encoder_type, v, logsig_mode)
+        self._use_last = [False] + [_use_last_pooling(encoder_type, v, logsig_mode, pool_override)
                                     for v in views[1:]]
 
         branch_kw = dict(embedding_dim=args.num_embedding, hidden_dim=args.num_hidden,

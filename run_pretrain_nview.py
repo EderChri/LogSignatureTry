@@ -80,10 +80,13 @@ def _logsig_suffix(args) -> str:
             base = f'_{smoothing}{wsiz}'
     stride = getattr(args, 'logsig_stride', 1)
     gt     = getattr(args, 'logsig_global_time', False)
+    pool   = getattr(args, 'logsig_pool', 'auto')
     if stride > 1:
         base += f'_s{stride}'
     if gt:
         base += '_gt'
+    if pool != 'auto':
+        base += f'_p{pool}'
     return base
 
 
@@ -140,15 +143,22 @@ args.num_views = 2
 
 print(f'Preprocessing views: {views}', flush=True)
 preprocess_start = time.time()
+_ls_mode   = getattr(args, 'logsig_mode', 'stream')
+_ls_wsiz   = getattr(args, 'logsig_window_size', 32)
+_ls_smooth = getattr(args, 'logsig_smoothing', 'tukey')
+_ls_sp     = getattr(args, 'logsig_smooth_param', 0.5)
+_ls_stride = getattr(args, 'logsig_stride', 1)
+_logsig_cache_key = (
+    f'{args.data_name}_d{args.logsig_depth}_{_ls_mode}'
+    f'_w{_ls_wsiz}_s{_ls_stride}_{_ls_smooth}_sp{_ls_sp}_gt{int(_gt)}'
+)
 preprocessed = preprocess_data(
     X_train_intp, X_train_intp, views=views,
     logsig_depth=args.logsig_depth,
-    logsig_mode=getattr(args, 'logsig_mode', 'stream'),
-    logsig_window_size=getattr(args, 'logsig_window_size', 32),
-    logsig_smoothing=getattr(args, 'logsig_smoothing', 'tukey'),
-    logsig_smooth_param=getattr(args, 'logsig_smooth_param', 0.5),
-    logsig_stride=getattr(args, 'logsig_stride', 1),
-    logsig_global_time=_gt,
+    logsig_mode=_ls_mode, logsig_window_size=_ls_wsiz,
+    logsig_smoothing=_ls_smooth, logsig_smooth_param=_ls_sp,
+    logsig_stride=_ls_stride, logsig_global_time=_gt,
+    logsig_cache_key=_logsig_cache_key,
 )
 v1_tr = preprocessed['v1'][0]
 v2_tr = preprocessed['v2'][0]
@@ -177,6 +187,12 @@ best_model_path = (f'model_pretrain/{args.data_name}/'
 
 in_dims = [args.num_feature, args.num_feature_v2]
 encoder = EncoderNView(args, views=list(views), in_dims=in_dims).to(device)
+if hasattr(torch, 'compile'):
+    try:
+        encoder = torch.compile(encoder)
+        print('torch.compile applied to encoder', flush=True)
+    except Exception as e:
+        print(f'torch.compile skipped: {e}', flush=True)
 encoder_optimizer = torch.optim.Adam(encoder.parameters(), lr=args.lr,
                                      weight_decay=args.weight_decay)
 scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(

@@ -2,6 +2,7 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.nn.attention import sdpa_kernel, SDPBackend
 
 
 class PositionalEncoding(nn.Module):
@@ -24,25 +25,28 @@ class PositionalEncoding(nn.Module):
 
 
 class InteractionLayer(nn.Module):
-    def __init__(self, hidden_size, num_heads):
+    def __init__(self, hidden_size, num_heads, residual=True):
         super(InteractionLayer, self).__init__()
         self.hidden_size = hidden_size
         self.num_heads = num_heads
-        
+        self.residual = residual
+
         self.multihead_attn = nn.MultiheadAttention(
             embed_dim=hidden_size,
             num_heads=num_heads,
             batch_first=True
         )
         self.norm = nn.LayerNorm(hidden_size)
-        
+
     def forward(self, ht, hd, hf, return_attn=False):
         N, L, D = ht.size()
         h = torch.stack([ht, hd, hf], dim=2)  # [N, L, 3, D]
         h = h.view(N * L, 3, D)               # [N*L, 3, D] — attention across views at each timestep
 
-        attn_output, attn_weights = self.multihead_attn(h, h, h)  # attn_weights: [N*L, 3, 3]
-        output = self.norm(h + attn_output)
+        # seq_len=3 breaks _scaled_dot_product_efficient_attention; force math backend
+        with sdpa_kernel(SDPBackend.MATH):
+            attn_output, attn_weights = self.multihead_attn(h, h, h)  # attn_weights: [N*L, 3, 3]
+        output = self.norm(h + attn_output if self.residual else attn_output)
         output = output.view(N, L, 3, D)
 
         ht_i, hd_i, hf_i = output[:, :, 0, :], output[:, :, 1, :], output[:, :, 2, :]
@@ -93,11 +97,16 @@ class InteractionLayerStridedLogsig(nn.Module):
         N, L, D = full_hs[0].size()
         V_full  = len(full_hs)
 
-        # Step 1: timestep-wise cross-view self-attention among full-res views
-        h = torch.stack(full_hs, dim=2).view(N * L, V_full, D)
-        attn_out, _ = self.full_mha(h, h, h)
-        h = self.full_norm(h + attn_out).view(N, L, V_full, D)
-        full_res = [h[:, :, i, :] for i in range(V_full)]
+        # Step 1: timestep-wise cross-view self-attention among full-res views.
+        # Skip when V_full==1: attention over a single token is identity, and
+        # some CUDA efficient-attention kernels reject seq_len=1 in eval mode.
+        if V_full == 1:
+            full_res = full_hs
+        else:
+            h = torch.stack(full_hs, dim=2).view(N * L, V_full, D)
+            attn_out, _ = self.full_mha(h, h, h)
+            h = self.full_norm(h + attn_out).view(N, L, V_full, D)
+            full_res = [h[:, :, i, :] for i in range(V_full)]
 
         # Step 2: each full-res view attends to strided logsig
         cross_full = []
@@ -118,20 +127,130 @@ class InteractionLayerStridedLogsig(nn.Module):
         return results
 
 
+class InteractionLayerViewEmbed(nn.Module):
+    """Standard MHA interaction layer with learnable per-view offset vectors.
+
+    Before computing attention, a view-specific embedding is added to each
+    view's hidden states.  This gives the shared W_q / W_k projections a way
+    to distinguish views geometrically — even when the raw encoder outputs are
+    orthogonal — without changing the rest of the architecture.
+
+    Initialised to zeros so training starts identical to InteractionLayer.
+    """
+    def __init__(self, hidden_size: int, num_heads: int,
+                 num_views: int = 3, residual: bool = True):
+        super().__init__()
+        self.residual = residual
+        self.view_embeds = nn.Parameter(torch.zeros(num_views, hidden_size))
+        self.multihead_attn = nn.MultiheadAttention(
+            embed_dim=hidden_size, num_heads=num_heads, batch_first=True)
+        self.norm = nn.LayerNorm(hidden_size)
+
+    @torch._dynamo.disable
+    def forward(self, ht, hd, hf, return_attn=False):
+        N, L, D = ht.size()
+        ht_in = ht + self.view_embeds[0]
+        hd_in = hd + self.view_embeds[1]
+        hf_in = hf + self.view_embeds[2]
+
+        h = torch.stack([ht_in, hd_in, hf_in], dim=2).view(N * L, 3, D)
+        # seq_len=3 breaks _scaled_dot_product_efficient_attention; force math backend
+        with sdpa_kernel(SDPBackend.MATH):
+            attn_out, attn_weights = self.multihead_attn(h, h, h)
+        out = self.norm(h + attn_out if self.residual else attn_out)
+        out = out.view(N, L, 3, D)
+
+        ht_i, hd_i, hf_i = out[:, :, 0], out[:, :, 1], out[:, :, 2]
+        if return_attn:
+            return ht_i, hd_i, hf_i, attn_weights.view(N, L, 3, 3)
+        return ht_i, hd_i, hf_i
+
+
+class InteractionLayerBilinear(nn.Module):
+    """Cross-view interaction via asymmetric bilinear attention.
+
+    Score for query view i attending to key view j:
+        s_{ij} = h_i^T  W_{ij}  h_j  /  sqrt(D)
+
+    W_{ij} is a dedicated D×D matrix per ordered pair (9 total for 3 views).
+    This bridges orthogonal view subspaces without requiring aligned encoders.
+    W_b initialised with std = 1/sqrt(D) so initial scores are O(1).
+    """
+    def __init__(self, hidden_size: int, num_views: int = 3, residual: bool = True):
+        super().__init__()
+        self.hidden_size = hidden_size
+        self.num_views   = num_views
+        self.residual    = residual
+
+        self.W_b = nn.Parameter(
+            torch.randn(num_views, num_views, hidden_size, hidden_size)
+            * (hidden_size ** -0.5)
+        )
+        self.W_v = nn.Linear(hidden_size, hidden_size, bias=False)
+        self.W_o = nn.Linear(hidden_size, hidden_size)
+        self.norm = nn.LayerNorm(hidden_size)
+
+    @torch._dynamo.disable
+    def forward(self, ht, hd, hf, return_attn=False):
+        N, L, D = ht.size()
+        h = torch.stack([ht, hd, hf], dim=2).view(N * L, 3, D)
+
+        # scores[n,i,j] = h[n,i,:] @ W_b[i,j,:,:] @ h[n,j,:] / sqrt(D)
+        scores = torch.einsum('nid,ijde,nje->nij', h, self.W_b, h) / (D ** 0.5)
+        attn = scores.softmax(dim=-1)
+
+        V   = self.W_v(h)
+        out = self.W_o(torch.bmm(attn, V))
+        out = self.norm(h + out if self.residual else out)
+        out = out.view(N, L, 3, D)
+
+        ht_i, hd_i, hf_i = out[:, :, 0], out[:, :, 1], out[:, :, 2]
+        if return_attn:
+            return ht_i, hd_i, hf_i, attn.view(N, L, 3, 3)
+        return ht_i, hd_i, hf_i
+
+
+def _make_interaction_layer(args, num_views: int = 3, strided_idx: int = None):
+    """Return the appropriate InteractionLayer based on args.interaction_type.
+
+    Strided logsig always gets InteractionLayerStridedLogsig regardless of
+    interaction_type — its asymmetric cross-attention is already specialised.
+    """
+    if strided_idx is not None:
+        return InteractionLayerStridedLogsig(
+            args.num_embedding, args.num_head, num_views, strided_idx)
+
+    il_type  = getattr(args, 'interaction_type', 'attention')
+    residual = not getattr(args, 'no_interaction_residual', False)
+
+    if il_type == 'view_embed':
+        return InteractionLayerViewEmbed(args.num_embedding, args.num_head, num_views, residual)
+    if il_type == 'bilinear':
+        return InteractionLayerBilinear(args.num_embedding, num_views, residual)
+    return InteractionLayer(args.num_embedding, args.num_head, residual)
+
+
 def _uses_mlp_for_view(encoder_type: str, view: str) -> bool:
     """Return True if this view should use LogSigMLP instead of a transformer."""
     return encoder_type == 'mlp_logsig' and view == 'logsig'
 
 
-def _use_last_pooling(encoder_type: str, view: str, logsig_mode: str = 'stream') -> bool:
+def _use_last_pooling(encoder_type: str, view: str, logsig_mode: str = 'stream',
+                      pool_override: str = 'auto') -> bool:
     """True → h[:, -1, :];  False → h.mean(dim=1).
 
-    last-position pooling is only meaningful for stream mode, where position
-    L-1 holds the cumulative log-signature of the entire path.  In window/
-    window_smooth modes every position carries a local window signature and
-    no single position is globally privileged, so mean pooling is used instead.
+    pool_override='auto' (default): last-token for mlp_logsig + stream only —
+      identical to the original behaviour.
+    pool_override='last': last-token for any logsig view (ablation).
+    pool_override='mean': mean pool for any logsig view (ablation).
     """
-    return encoder_type == 'mlp_logsig' and view == 'logsig' and logsig_mode == 'stream'
+    if view != 'logsig':
+        return False
+    if pool_override == 'last':
+        return True
+    if pool_override == 'mean':
+        return False
+    return encoder_type == 'mlp_logsig' and logsig_mode == 'stream'
 
 
 def _pool(h: torch.Tensor, use_last: bool) -> torch.Tensor:
@@ -172,13 +291,13 @@ class Encoder(nn.Module):
         encoder_type  = getattr(args, 'encoder_type', 'transformer')
         logsig_mode   = getattr(args, 'logsig_mode',  'stream')
         logsig_stride = getattr(args, 'logsig_stride', 1)
+        pool_override = getattr(args, 'logsig_pool',   'auto')
         self.view2    = args.view2
         self.view3    = args.view3
         self._v2_mlp  = _uses_mlp_for_view(encoder_type, args.view2)
         self._v3_mlp  = _uses_mlp_for_view(encoder_type, args.view3)
-        # Pooling: last-position only for stream+MLP; mean for windowed or transformer
-        self._v2_last = _use_last_pooling(encoder_type, args.view2, logsig_mode)
-        self._v3_last = _use_last_pooling(encoder_type, args.view3, logsig_mode)
+        self._v2_last = _use_last_pooling(encoder_type, args.view2, logsig_mode, pool_override)
+        self._v3_last = _use_last_pooling(encoder_type, args.view3, logsig_mode, pool_override)
 
         self.positional_encoding = PositionalEncoding(args.num_embedding, args.dropout)
 
@@ -211,20 +330,17 @@ class Encoder(nn.Module):
                                            nhead=args.num_head, dropout=args.dropout, batch_first=True),
                 args.num_layers)
 
-        # Interaction layer: strided cross-attention when stride>1 in windowed mode
+        # Interaction layer
         _windowed = logsig_mode in ('window', 'window_smooth')
+        _strided_idx = None
         if logsig_stride > 1 and _windowed:
             _strided = [idx for idx, v in enumerate([args.view2, args.view3], start=1)
                         if v == 'logsig']
             if len(_strided) > 1:
                 raise ValueError("Strided interaction with multiple logsig views is not supported")
             if _strided:
-                self.interaction_layer = InteractionLayerStridedLogsig(
-                    args.num_embedding, args.num_head, 3, _strided[0])
-            else:
-                self.interaction_layer = InteractionLayer(args.num_embedding, args.num_head)
-        else:
-            self.interaction_layer = InteractionLayer(args.num_embedding, args.num_head)
+                _strided_idx = _strided[0]
+        self.interaction_layer = _make_interaction_layer(args, num_views=3, strided_idx=_strided_idx)
         self.output_layer_t = nn.Sequential(
             nn.Linear(args.num_embedding * 2, args.num_hidden),
             nn.LayerNorm(args.num_hidden), nn.ReLU(), nn.Dropout(args.dropout),
@@ -296,21 +412,18 @@ class Classifier(nn.Module):
                 self.self_attention = SelfAttention(args.num_hidden)
 
         elif self.args.feature == 'hidden':
-            _enc_type     = getattr(args, 'encoder_type', 'transformer')
             _logsig_mode  = getattr(args, 'logsig_mode',  'stream')
             _logsig_stride = getattr(args, 'logsig_stride', 1)
             _windowed = _logsig_mode in ('window', 'window_smooth')
+            _strided_idx = None
             if _logsig_stride > 1 and _windowed:
                 _strided = [idx for idx, v in enumerate([args.view2, args.view3], start=1)
                             if v == 'logsig']
                 if len(_strided) > 1:
                     raise ValueError("Strided interaction with multiple logsig views not supported")
-                self.interaction_layer = (
-                    InteractionLayerStridedLogsig(args.num_embedding, args.num_head, 3, _strided[0])
-                    if _strided else InteractionLayer(args.num_embedding, args.num_head)
-                )
-            else:
-                self.interaction_layer = InteractionLayer(args.num_embedding, args.num_head)
+                if _strided:
+                    _strided_idx = _strided[0]
+            self.interaction_layer = _make_interaction_layer(args, num_views=3, strided_idx=_strided_idx)
             
             ## output
             self.output_layer_t = nn.Sequential(
@@ -362,10 +475,11 @@ class Classifier(nn.Module):
             else:
                 ht_i, hd_i, hf_i = ht, hd, hf
             
-            enc_type    = getattr(self.args, 'encoder_type', 'transformer')
-            logsig_mode = getattr(self.args, 'logsig_mode',  'stream')
-            v2_last = _use_last_pooling(enc_type, getattr(self.args, 'view2', ''), logsig_mode)
-            v3_last = _use_last_pooling(enc_type, getattr(self.args, 'view3', ''), logsig_mode)
+            enc_type      = getattr(self.args, 'encoder_type', 'transformer')
+            logsig_mode   = getattr(self.args, 'logsig_mode',  'stream')
+            pool_override = getattr(self.args, 'logsig_pool',  'auto')
+            v2_last = _use_last_pooling(enc_type, getattr(self.args, 'view2', ''), logsig_mode, pool_override)
+            v3_last = _use_last_pooling(enc_type, getattr(self.args, 'view3', ''), logsig_mode, pool_override)
             zt = self.output_layer_t(torch.cat([ht.mean(dim=1), ht_i.mean(dim=1)], dim=-1))
             zd = self.output_layer_d(torch.cat([_pool(hd, v2_last), _pool(hd_i, v2_last)], dim=-1))
             zf = self.output_layer_f(torch.cat([_pool(hf, v3_last), _pool(hf_i, v3_last)], dim=-1))
