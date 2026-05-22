@@ -12,6 +12,7 @@ import os
 import pickle
 import numpy as np
 import pandas as pd
+from sklearn.model_selection import train_test_split
 
 
 # ---------------------------------------------------------------------------
@@ -41,8 +42,9 @@ WINDOW_LEN = 256
 STRIDE = 128
 RNG_SEED = 0
 
-# Reference Epilepsy counts for deriving HAR70plus train/val fractions
-_EP_TRAIN, _EP_VAL, _EP_TOTAL = 60, 20, 60 + 20 + 11420
+# Patient-level split sizes for HAR70plus (3 train / 2 val / 13 test out of 18 subjects)
+HAR70PLUS_N_TRAIN = 3
+HAR70PLUS_N_VAL   = 2
 
 
 def _window_file(fpath: str, keep_labels: set):
@@ -81,24 +83,45 @@ def _remap_labels(arrays: list, keep_labels: set):
     return [remap(y) for y in arrays], label_map
 
 
-def _stratified_split(X, y, train_frac, val_frac, rng):
-    classes = np.unique(y)
-    train_idx, val_idx, test_idx = [], [], []
-    for cls in classes:
-        idx = np.where(y == cls)[0]
-        rng.shuffle(idx)
-        n = len(idx)
-        n_train = max(1, round(n * train_frac))
-        n_val   = max(1, round(n * val_frac))
-        if n_train + n_val >= n:
-            n_train = max(1, n - 1)
-            n_val   = min(1, n - n_train)
-        train_idx.extend(idx[:n_train])
-        val_idx.extend(idx[n_train:n_train + n_val])
-        test_idx.extend(idx[n_train + n_val:])
-    return (X[train_idx], y[train_idx],
-            X[val_idx],   y[val_idx],
-            X[test_idx],  y[test_idx])
+def _stratified_patient_split(files: list, keep_labels: set,
+                              n_train: int, n_val: int, rng):
+    """
+    Assign patients to splits so that train and val each cover as many
+    activity classes as possible, while keeping each patient's windows
+    entirely within one split.
+
+    Strategy (greedy):
+    1. Randomly shuffle patients (for reproducibility via rng).
+    2. Pick patients for train greedily: prefer those that add new classes
+       not yet covered, stop when n_train reached.
+    3. Repeat for val from the remaining pool.
+    4. Everything else goes to test.
+    """
+    patient_cls = {}
+    for f in files:
+        _, y = _window_file(f, keep_labels)
+        patient_cls[f] = set(y.tolist())
+
+    pool = list(files)
+    rng.shuffle(pool)
+
+    def _greedy_pick(pool, n, covered):
+        chosen, remaining = [], []
+        # Pass 1: patients that add new classes
+        for f in pool:
+            if len(chosen) < n and (patient_cls[f] - covered):
+                chosen.append(f)
+                covered |= patient_cls[f]
+            else:
+                remaining.append(f)
+        # Pass 2: fill remaining slots from random order
+        while len(chosen) < n and remaining:
+            chosen.append(remaining.pop(0))
+        return chosen, remaining, covered
+
+    train_f, pool, cov_tr = _greedy_pick(pool, n_train, set())
+    val_f,   pool, _      = _greedy_pick(pool, n_val,   set())
+    return train_f, val_f, pool
 
 
 # ---------------------------------------------------------------------------
@@ -159,16 +182,22 @@ def preprocess_HAR70plus(data_dir: str = 'har70plus'):
     files = sorted(glob.glob(os.path.join(data_dir, '*.csv')))
     if not files:
         raise FileNotFoundError(f"No CSV files found in '{data_dir}'")
-    print(f'HAR70plus: pooling {len(files)} subjects…')
-    X_all, y_all = _pool_files(files, HAR70PLUS_KEEP_LABELS)
-    total = len(y_all)
-    print(f'  Total windows: {total}')
+    print(f'HAR70plus: {len(files)} subjects, patient-level split '
+          f'({HAR70PLUS_N_TRAIN} train / {HAR70PLUS_N_VAL} val / '
+          f'{len(files) - HAR70PLUS_N_TRAIN - HAR70PLUS_N_VAL} test)…')
     rng = np.random.default_rng(RNG_SEED)
-    X_tr, y_tr, X_va, y_va, X_te, y_te = _stratified_split(
-        X_all, y_all, _EP_TRAIN / _EP_TOTAL, _EP_VAL / _EP_TOTAL, rng)
+    train_files, val_files, test_files = _stratified_patient_split(
+        files, HAR70PLUS_KEEP_LABELS, HAR70PLUS_N_TRAIN, HAR70PLUS_N_VAL, rng)
+    print(f'  Train subjects: {[os.path.basename(f) for f in train_files]}')
+    print(f'  Val subjects:   {[os.path.basename(f) for f in val_files]}')
+    print(f'  Test subjects:  {[os.path.basename(f) for f in test_files]}')
+    X_tr, y_tr = _pool_files(train_files, HAR70PLUS_KEEP_LABELS)
+    X_va, y_va = _pool_files(val_files,   HAR70PLUS_KEEP_LABELS)
+    X_te, y_te = _pool_files(test_files,  HAR70PLUS_KEEP_LABELS)
     [y_tr, y_va, y_te], label_map = _remap_labels([y_tr, y_va, y_te], HAR70PLUS_KEEP_LABELS)
+    total = len(y_tr) + len(y_va) + len(y_te)
     print(f'  train: {len(y_tr)}, val: {len(y_va)}, test: {len(y_te)}  '
-          f'({len(y_tr)/total:.2%}/{len(y_va)/total:.2%}/{len(y_te)/total:.2%})')
+          f'({len(y_tr)/total:.1%}/{len(y_va)/total:.1%}/{len(y_te)/total:.1%})')
     print(f'  Train classes: {np.unique(y_tr).tolist()}, Val classes: {np.unique(y_va).tolist()}')
     print(f'  Label map: {label_map}')
     os.makedirs('preprocessed_data', exist_ok=True)

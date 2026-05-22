@@ -72,7 +72,8 @@ def train(args, encoder, clf, encoder_optimizer, clf_optimizer, loader, mode='pr
     total_samples = 0
     
     pbar = tqdm(loader, desc=f"Training ({mode})", disable=_tqdm_disabled(), dynamic_ncols=True)
-    for batch in pbar:      
+    _batch_idx = 0
+    for batch in pbar:
         xt, dx, xf, xt_aug, dx_aug, xf_aug, y = [t.float().to(device) for t in batch]
         
         encoder_optimizer.zero_grad()
@@ -123,15 +124,22 @@ def train(args, encoder, clf, encoder_optimizer, clf_optimizer, loader, mode='pr
             total_loss_c += loss_c.item() * xt.size(0)
         total_samples += xt.size(0)
         
-        pbar.set_postfix({'loss': loss.item(), 'loss_t': loss_t.item(), 'loss_d': loss_d.item(), 'loss_f': loss_f.item()})
-    
+        ht_n = ht.norm(dim=-1).mean().item()
+        hd_n = hd.norm(dim=-1).mean().item()
+        hf_n = hf.norm(dim=-1).mean().item()
+        pbar.set_postfix({'loss': loss.item(), 'loss_t': loss_t.item(), 'loss_d': loss_d.item(), 'loss_f': loss_f.item(),
+                          'ht_n': ht_n, 'hd_n': hd_n, 'hf_n': hf_n})
+        if _batch_idx % 100 == 0:
+            print(f"  [batch {_batch_idx:4d}] ht_n={ht_n:.3f}  hd_n={hd_n:.3f}  hf_n={hf_n:.3f}", flush=True)
+        _batch_idx += 1
+
     avg_loss = total_loss / total_samples
     avg_loss_c = total_loss_c / total_samples
-    
+
     if mode == 'pretrain':
         return avg_loss
     else:
-        return avg_loss, avg_loss_c        
+        return avg_loss, avg_loss_c
 
 
 def test(args, encoder, clf, loader, mode='pretrain', device='cuda'):
@@ -171,7 +179,8 @@ def test(args, encoder, clf, loader, mode='pretrain', device='cuda'):
                 total_loss_c += loss_c.item() * xt.size(0)
             total_samples += xt.size(0)
             
-            pbar.set_postfix({'loss': loss.item(), 'loss_t': loss_t.item(), 'loss_d': loss_d.item(), 'loss_f': loss_f.item()})
+            pbar.set_postfix({'loss': loss.item(), 'loss_t': loss_t.item(), 'loss_d': loss_d.item(), 'loss_f': loss_f.item(),
+                              'ht_n': ht.norm(dim=-1).mean().item(), 'hd_n': hd.norm(dim=-1).mean().item(), 'hf_n': hf.norm(dim=-1).mean().item()})
     
     avg_loss = total_loss / total_samples
     avg_loss_c = total_loss_c / total_samples
@@ -184,11 +193,13 @@ def test(args, encoder, clf, loader, mode='pretrain', device='cuda'):
 
 ## Pretrained model loader
 def remove_module_prefix(state_dict):
-    # Prevent multi-gpu -> single-gpu errors
+    # Strip DataParallel ('module.') and torch.compile ('_orig_mod.') prefixes
     new_state_dict = {}
     for key, value in state_dict.items():
         if key.startswith('module.'):
-            new_key = key[7:]  # Remove the first 7 characters ('module.')
+            new_key = key[len('module.'):]
+        elif key.startswith('_orig_mod.'):
+            new_key = key[len('_orig_mod.'):]
         else:
             new_key = key
         new_state_dict[new_key] = value

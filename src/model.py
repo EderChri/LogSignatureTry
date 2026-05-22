@@ -141,7 +141,7 @@ class InteractionLayerViewEmbed(nn.Module):
                  num_views: int = 3, residual: bool = True):
         super().__init__()
         self.residual = residual
-        self.view_embeds = nn.Parameter(torch.zeros(num_views, hidden_size))
+        self.view_embeds = nn.Parameter(torch.randn(num_views, hidden_size) * (hidden_size ** -0.5))
         self.multihead_attn = nn.MultiheadAttention(
             embed_dim=hidden_size, num_heads=num_heads, batch_first=True)
         self.norm = nn.LayerNorm(hidden_size)
@@ -191,22 +191,55 @@ class InteractionLayerBilinear(nn.Module):
         self.norm = nn.LayerNorm(hidden_size)
 
     @torch._dynamo.disable
-    def forward(self, ht, hd, hf, return_attn=False):
-        N, L, D = ht.size()
-        h = torch.stack([ht, hd, hf], dim=2).view(N * L, 3, D)
+    def forward(self, *hs, return_attn=False):
+        V = len(hs)
+        N, L, D = hs[0].size()
+        h = torch.stack(list(hs), dim=2).view(N * L, V, D)
 
         # scores[n,i,j] = h[n,i,:] @ W_b[i,j,:,:] @ h[n,j,:] / sqrt(D)
         scores = torch.einsum('nid,ijde,nje->nij', h, self.W_b, h) / (D ** 0.5)
         attn = scores.softmax(dim=-1)
 
-        V   = self.W_v(h)
-        out = self.W_o(torch.bmm(attn, V))
+        Vt  = self.W_v(h)
+        out = self.W_o(torch.bmm(attn, Vt))
         out = self.norm(h + out if self.residual else out)
-        out = out.view(N, L, 3, D)
+        out = out.view(N, L, V, D)
+
+        result = [out[:, :, i, :] for i in range(V)]
+        if return_attn:
+            return result + [attn.view(N, L, V, V)]
+        return result
+
+
+class InteractionLayerCrossTime(nn.Module):
+    """Original-paper InteractionLayer: temporal self-attention per view independently.
+
+    Reshapes to [N*3, L, D] and applies MHA across the L time steps within each view.
+    This is NOT cross-view interaction — xt, dx, xf each refine their own temporal
+    representations separately, identical in effect to a second transformer encoder pass.
+    Included for comparison with the correct cross-feature variant (InteractionLayer).
+    """
+    def __init__(self, hidden_size: int, num_heads: int, residual: bool = True):
+        super().__init__()
+        self.residual = residual
+        self.multihead_attn = nn.MultiheadAttention(
+            embed_dim=hidden_size, num_heads=num_heads, batch_first=True)
+        self.norm = nn.LayerNorm(hidden_size)
+
+    def forward(self, ht, hd, hf, return_attn=False):
+        N, L, D = ht.size()
+        h = torch.stack([ht, hd, hf], dim=2)             # [N, L, 3, D]
+        h = h.permute(0, 2, 1, 3).contiguous().view(N * 3, L, D)  # [N*3, L, D]
+
+        attn_out, _ = self.multihead_attn(h, h, h)
+        out = self.norm(h + attn_out if self.residual else attn_out)
+        out = out.view(N, 3, L, D).permute(0, 2, 1, 3)   # [N, L, 3, D]
 
         ht_i, hd_i, hf_i = out[:, :, 0], out[:, :, 1], out[:, :, 2]
         if return_attn:
-            return ht_i, hd_i, hf_i, attn.view(N, L, 3, 3)
+            # No cross-view attention exists; return uniform weights as placeholder
+            uniform = torch.full((N, L, 3, 3), 1 / 3, device=ht.device, dtype=ht.dtype)
+            return ht_i, hd_i, hf_i, uniform
         return ht_i, hd_i, hf_i
 
 
@@ -227,6 +260,8 @@ def _make_interaction_layer(args, num_views: int = 3, strided_idx: int = None):
         return InteractionLayerViewEmbed(args.num_embedding, args.num_head, num_views, residual)
     if il_type == 'bilinear':
         return InteractionLayerBilinear(args.num_embedding, num_views, residual)
+    if il_type == 'cross_time':
+        return InteractionLayerCrossTime(args.num_embedding, args.num_head, residual)
     return InteractionLayer(args.num_embedding, args.num_head, residual)
 
 

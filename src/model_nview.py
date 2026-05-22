@@ -16,7 +16,7 @@ import torch.nn as nn
 
 from .model import (PositionalEncoding, LogSigMLP, SelfAttention,
                     _uses_mlp_for_view, _use_last_pooling, _pool,
-                    InteractionLayerStridedLogsig)
+                    InteractionLayerStridedLogsig, InteractionLayerBilinear)
 
 
 # ---------------------------------------------------------------------------
@@ -42,6 +42,14 @@ class _TransformerBranch(nn.Module):
 # ---------------------------------------------------------------------------
 # N-view interaction layer
 # ---------------------------------------------------------------------------
+
+def _make_il_nview(il_type: str, hidden_size: int, num_heads: int,
+                   num_views: int, residual: bool) -> nn.Module:
+    """Return the right interaction layer for N-view mode."""
+    if il_type == 'bilinear':
+        return InteractionLayerBilinear(hidden_size, num_views, residual)
+    return InteractionLayerNView(hidden_size, num_heads, num_views)
+
 
 class InteractionLayerNView(nn.Module):
     """Cross-view multi-head attention for N views.
@@ -126,6 +134,8 @@ class EncoderNView(nn.Module):
 
         # Interaction layer: cross-attention when stride>1 in windowed mode
         _windowed = logsig_mode in ('window', 'window_smooth')
+        _il_type  = getattr(args, 'interaction_type', 'attention')
+        _residual = not getattr(args, 'no_interaction_residual', False)
         if logsig_stride > 1 and _windowed:
             _strided = [i for i, v in enumerate(views) if v == 'logsig']
             if len(_strided) > 1:
@@ -134,11 +144,12 @@ class EncoderNView(nn.Module):
                 InteractionLayerStridedLogsig(args.num_embedding, args.num_head,
                                               self.num_views, _strided[0])
                 if _strided else
-                InteractionLayerNView(args.num_embedding, args.num_head, self.num_views)
+                _make_il_nview(_il_type, args.num_embedding, args.num_head,
+                               self.num_views, _residual)
             )
         else:
-            self.interaction_layer = InteractionLayerNView(
-                args.num_embedding, args.num_head, self.num_views
+            self.interaction_layer = _make_il_nview(
+                _il_type, args.num_embedding, args.num_head, self.num_views, _residual
             )
 
         self.output_layers = nn.ModuleList([
@@ -199,7 +210,9 @@ class ClassifierNView(nn.Module):
                                     for v in views[1:]]
 
         if args.feature == 'hidden':
-            _windowed = logsig_mode in ('window', 'window_smooth')
+            _windowed  = logsig_mode in ('window', 'window_smooth')
+            _il_type   = getattr(args, 'interaction_type', 'attention')
+            _residual  = not getattr(args, 'no_interaction_residual', False)
             if logsig_stride > 1 and _windowed:
                 _strided = [i for i, v in enumerate(views) if v == 'logsig']
                 if len(_strided) > 1:
@@ -208,11 +221,12 @@ class ClassifierNView(nn.Module):
                     InteractionLayerStridedLogsig(args.num_embedding, args.num_head,
                                                   self.num_views, _strided[0])
                     if _strided else
-                    InteractionLayerNView(args.num_embedding, args.num_head, self.num_views)
+                    _make_il_nview(_il_type, args.num_embedding, args.num_head,
+                                   self.num_views, _residual)
                 )
             else:
-                self.interaction_layer = InteractionLayerNView(
-                    args.num_embedding, args.num_head, self.num_views
+                self.interaction_layer = _make_il_nview(
+                    _il_type, args.num_embedding, args.num_head, self.num_views, _residual
                 )
             self.output_layers = nn.ModuleList([
                 nn.Sequential(

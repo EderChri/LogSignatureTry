@@ -80,17 +80,27 @@ def _logsig_suffix(args) -> str:
         if mode == 'window':
             base = f'_win{wsiz}'
         else:
-            smoothing = getattr(args, 'logsig_smoothing', 'tukey')
+            smoothing    = getattr(args, 'logsig_smoothing', 'tukey')
+            smooth_param = getattr(args, 'logsig_smooth_param', 0.5)
+            msp          = getattr(args, 'logsig_multi_smooth_params', None)
             base = f'_{smoothing}{wsiz}'
+            if msp:
+                k = len([p.strip() for p in msp.split(',')])
+                base += f'_msp{k}'
+            elif smooth_param != 0.5:
+                base += f'_sp{smooth_param}'
     stride = getattr(args, 'logsig_stride', 1)
     gt     = getattr(args, 'logsig_global_time', False)
     pool   = getattr(args, 'logsig_pool', 'auto')
+    depth  = getattr(args, 'logsig_depth', 2)
     if stride > 1:
         base += f'_s{stride}'
     if gt:
         base += '_gt'
     if pool != 'auto':
         base += f'_p{pool}'
+    if depth != 2:
+        base += f'_d{depth}'
     return base
 
 _lsig_suffix = _logsig_suffix(args)
@@ -129,6 +139,7 @@ y_test = torch.tensor(y_test)
 
 ##
 views = ('xt', args.view2, args.view3)
+_ft_msp = getattr(args, 'logsig_multi_smooth_params', None)
 _logsig_kw = dict(
     logsig_depth=args.logsig_depth,
     logsig_mode=getattr(args, 'logsig_mode', 'stream'),
@@ -137,6 +148,7 @@ _logsig_kw = dict(
     logsig_smooth_param=getattr(args, 'logsig_smooth_param', 0.5),
     logsig_stride=getattr(args, 'logsig_stride', 1),
     logsig_global_time=getattr(args, 'logsig_global_time', False),
+    logsig_multi_smooth_params=[float(p) for p in _ft_msp.split(',')] if _ft_msp else None,
 )
 
 preprocessed_data = preprocess_data(X_train_intp, X_val_intp, views=views, **_logsig_kw)
@@ -170,8 +182,9 @@ if args.num_feature > 64:
     args.num_feature = 64
 
 _gt = getattr(args, 'logsig_global_time', False)
-args.num_feature_v2 = get_view_num_features(args.view2, args.num_feature, args.logsig_depth, _gt)
-args.num_feature_v3 = get_view_num_features(args.view3, args.num_feature, args.logsig_depth, _gt)
+_ft_msp_list = [float(p) for p in _ft_msp.split(',')] if _ft_msp else None
+args.num_feature_v2 = get_view_num_features(args.view2, args.num_feature, args.logsig_depth, _gt, _ft_msp_list)
+args.num_feature_v3 = get_view_num_features(args.view3, args.num_feature, args.logsig_depth, _gt, _ft_msp_list)
 
 pretrain_tag = f'{args.pretrain_data_name}_v2{args.view2}_v3{args.view3}_ep{args.epochs_pretrain}_{args.seed}{_enc_suffix}{_lsig_suffix}{_il_suffix}'
 best_model_path = f'model_pretrain/{args.pretrain_data_name}/{pretrain_tag}.pth'

@@ -149,11 +149,24 @@ BEST_CKPT = f'model_pretrain/{args.pretrain_data_name}/{RUN_TAG}.pth'
 
 def _load_encoder(ckpt_path):
     enc = Encoder(args)
-    enc = load_encoder(enc, ckpt_path, {
+    # Only pass dimension checks for plain Linear input layers.
+    # MLP-based layers (mlp_logsig) have nested keys like input_layer_d.net.0.weight
+    # and must be loaded as-is.
+    try:
+        import torch as _torch
+        _sd = _torch.load(ckpt_path, map_location='cpu', weights_only=False)
+        if isinstance(_sd, dict) and 'encoder_state_dict' in _sd:
+            _sd = _sd['encoder_state_dict']
+    except Exception:
+        _sd = {}
+    _candidates = {
         'input_layer_t': args.num_feature,
         'input_layer_d': args.num_feature_v2,
         'input_layer_f': args.num_feature_v3,
-    })
+    }
+    _new_num_features = {k: v for k, v in _candidates.items()
+                         if f'{k}.weight' in _sd}
+    enc = load_encoder(enc, ckpt_path, _new_num_features or None)
     return enc.to(device).eval()
 
 
@@ -421,8 +434,10 @@ def _plot_logit_analysis(all_logits, num_heads, view_names, run_tag):
     ax = axes_b[0]
     for qi, (qname, col) in enumerate(zip(view_names, colors_v)):
         ranges = logit_range[:, :, qi].numpy().flatten()
-        ax.hist(ranges, bins=80, alpha=0.55, label=f'query = {qname}',
-                color=col, density=True)
+        rmin, rmax = float(ranges.min()), float(ranges.max())
+        bins = 80 if rmax > rmin else 1
+        ax.hist(ranges, bins=bins, alpha=0.55, label=f'query = {qname}',
+                color=col, density=(rmax > rmin))
         ax.axvline(ranges.mean(), color=col, linestyle='--', linewidth=1.5)
     ax.set_xlabel('Logit range (max − min)', fontsize=9)
     ax.set_ylabel('Density', fontsize=9)
@@ -446,7 +461,180 @@ def _plot_logit_analysis(all_logits, num_heads, view_names, run_tag):
     fig_b.savefig(out_b, dpi=150, bbox_inches='tight')
     print(f'Saved: {out_b}')
 
-    plt.show()
+    plt.close()
+
+
+# ---------------------------------------------------------------------------
+# Investigation 1b: bilinear score analysis (no multihead_attn → separate path)
+# ---------------------------------------------------------------------------
+
+def _extract_bilinear_scores(encoder, loader):
+    """Extract pre-softmax bilinear scores and post-softmax attention.
+
+    Returns (all_scores, all_attn): each [N_total*L, 3, 3].
+    all_scores = h_i^T W_b[i,j] h_j / sqrt(D) before softmax.
+    all_attn   = softmax(scores, dim=-1).
+    Returns None if the interaction layer is not InteractionLayerBilinear.
+    """
+    il = encoder.interaction_layer
+    if not hasattr(il, 'W_b'):
+        print('Skipping bilinear score analysis: not an InteractionLayerBilinear')
+        return None
+
+    D = il.hidden_size
+    W_b = il.W_b.detach()   # [3, 3, D, D]
+
+    all_scores = []
+    all_attn   = []
+
+    with torch.no_grad():
+        for batch in loader:
+            Xt, dX, Xf = batch[0].to(device), batch[1].to(device), batch[2].to(device)
+            ht, hd, hf, _, _, _ = encoder(Xt, dX, Xf)
+            N, L, _ = ht.shape
+            h = torch.stack([ht, hd, hf], dim=2).view(N * L, 3, D)  # [N*L, 3, D]
+
+            scores = torch.einsum('nid,ijde,nje->nij', h, W_b, h) / (D ** 0.5)
+            attn   = scores.softmax(dim=-1)
+
+            all_scores.append(scores.cpu())
+            all_attn.append(attn.cpu())
+
+    return torch.cat(all_scores, dim=0), torch.cat(all_attn, dim=0)
+
+
+def _plot_bilinear_analysis(all_scores, all_attn, view_names, run_tag):
+    """Diagnostic figure for bilinear InteractionLayer.
+
+    Figure A: score matrices (mean pre-softmax, std, mean post-softmax attn).
+    Figure B: score range distribution — key diagnostic for discriminability.
+    """
+    colors_v = ['#4C72B0', '#DD8452', '#55A868']
+
+    # Figure A: 3-panel matrix view
+    fig_a, axes_a = plt.subplots(1, 3, figsize=(13, 4))
+    fig_a.suptitle(
+        f'Bilinear InteractionLayer — score & attention matrices\n'
+        f'views: {" / ".join(view_names)}',
+        fontsize=11, fontweight='bold'
+    )
+
+    mean_scores = all_scores.mean(dim=0).numpy()   # [3, 3]
+    std_scores  = all_scores.std(dim=0).numpy()
+    mean_attn   = all_attn.mean(dim=0).numpy()
+
+    for ax, mat, title, cmap, center_zero in [
+        (axes_a[0], mean_scores, 'Pre-softmax scores  h_i·W_b·h_j/√D\n(mean over all tokens)', 'RdBu_r', True),
+        (axes_a[1], std_scores,  'Score std dev\n(high = discriminative)', 'Oranges', False),
+        (axes_a[2], mean_attn,   'Post-softmax attention\n(mean over all tokens)', 'Blues', False),
+    ]:
+        if center_zero:
+            vabs = max(abs(mat.min()), abs(mat.max())) + 1e-6
+            im = ax.imshow(mat, cmap=cmap, vmin=-vabs, vmax=vabs, aspect='auto')
+        else:
+            im = ax.imshow(mat, cmap=cmap, vmin=0, vmax=None if not center_zero else 1,
+                           aspect='auto')
+        ax.set_title(title, fontsize=9)
+        ax.set_xticks(range(3)); ax.set_yticks(range(3))
+        ax.set_xticklabels(view_names, fontsize=8)
+        ax.set_yticklabels(view_names, fontsize=8)
+        ax.set_xlabel('Key (attends to)', fontsize=7)
+        ax.set_ylabel('Query', fontsize=7)
+        for i in range(3):
+            for j in range(3):
+                ax.text(j, i, f'{mat[i,j]:.4f}', ha='center', va='center', fontsize=8,
+                        fontweight='bold',
+                        color='white' if (not center_zero and mat[i,j] > 0.6 * mat.max() + 1e-6) else 'black')
+        plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+
+    plt.tight_layout()
+    out_a = os.path.join(PLOT_DIR, f'bilinear_{run_tag}_matrices.png')
+    fig_a.savefig(out_a, dpi=150, bbox_inches='tight')
+    print(f'Saved: {out_a}')
+    plt.close(fig_a)
+
+    # Figure B: score range distribution (discriminability)
+    score_range = all_scores.max(dim=-1).values - all_scores.min(dim=-1).values  # [NT, 3]
+
+    fig_b, axes_b = plt.subplots(1, 3, figsize=(14, 4))
+    fig_b.suptitle(
+        'Bilinear score analysis — discriminability\n'
+        'Score range near 0 → softmax is uniform → views not distinguished',
+        fontsize=10, fontweight='bold'
+    )
+
+    # Panel 1: score range distribution per query
+    ax = axes_b[0]
+    for qi, (qname, col) in enumerate(zip(view_names, colors_v)):
+        ranges = score_range[:, qi].numpy()
+        _safe_hist(ax, ranges, alpha=0.55, label=f'query = {qname}  (mean={ranges.mean():.3f})',
+                   color=col, density=True)
+        ax.axvline(ranges.mean(), color=col, linestyle='--', linewidth=1.5)
+    ax.set_xlabel('Score range per query row (max − min)', fontsize=9)
+    ax.set_ylabel('Density', fontsize=9)
+    ax.set_title('Score range distribution\n(higher = can route to specific views)', fontsize=9)
+    ax.legend(fontsize=7, frameon=False)
+    ax.spines[['top', 'right']].set_visible(False)
+
+    # Panel 2: per-pair score distributions
+    ax = axes_b[1]
+    pair_labels = [f'{view_names[i]}→{view_names[j]}' for i in range(3) for j in range(3)]
+    pair_colors = [colors_v[i] for i in range(3) for _ in range(3)]
+    pair_styles = ['-', '--', ':'] * 3
+    for idx, (i, j) in enumerate([(i, j) for i in range(3) for j in range(3)]):
+        vals = all_scores[:, i, j].numpy()
+        _safe_hist(ax, vals, alpha=0.35, label=pair_labels[idx],
+                   color=pair_colors[idx], density=True,
+                   histtype='step', linestyle=pair_styles[idx], linewidth=1.5)
+    ax.axvline(0, color='black', linewidth=0.8, linestyle=':')
+    ax.set_xlabel('Pre-softmax bilinear score', fontsize=9)
+    ax.set_ylabel('Density', fontsize=9)
+    ax.set_title('All 9 pair scores\n(separated = W_b learned routing)', fontsize=9)
+    ax.legend(fontsize=6, frameon=False, ncol=2)
+    ax.spines[['top', 'right']].set_visible(False)
+
+    # Panel 3: bar chart of mean attn per entry (flattened 3×3)
+    ax = axes_b[2]
+    labels_flat = [f'{view_names[i]}→{view_names[j]}' for i in range(3) for j in range(3)]
+    vals_flat   = mean_attn.flatten()
+    bar_colors  = [colors_v[i] for i in range(3) for _ in range(3)]
+    bar_alphas  = [1.0, 0.6, 0.3] * 3
+    bars = ax.bar(range(9), vals_flat, color=bar_colors,
+                  alpha=0.8, edgecolor='black', linewidth=0.5)
+    ax.axhline(1/3, color='grey', linestyle='--', linewidth=1.2,
+               label='uniform (1/3)')
+    ax.set_xticks(range(9))
+    ax.set_xticklabels(labels_flat, rotation=45, ha='right', fontsize=7)
+    ax.set_ylabel('Mean post-softmax attention', fontsize=9)
+    ax.set_title('Routing summary\n(deviation from 1/3 = learned preference)', fontsize=9)
+    ax.legend(fontsize=8, frameon=False)
+    ax.spines[['top', 'right']].set_visible(False)
+
+    plt.tight_layout()
+    out_b = os.path.join(PLOT_DIR, f'bilinear_{run_tag}_range.png')
+    fig_b.savefig(out_b, dpi=150, bbox_inches='tight')
+    print(f'Saved: {out_b}')
+    plt.close(fig_b)
+
+
+# ---------------------------------------------------------------------------
+# Shared plotting helpers
+# ---------------------------------------------------------------------------
+
+def _safe_hist(ax, data, **kwargs):
+    """ax.hist that degrades gracefully when data has zero or near-zero range."""
+    lo, hi = float(data.min()), float(data.max())
+    if hi <= lo:
+        ax.axvline(lo, color=kwargs.get('color', 'gray'),
+                   alpha=kwargs.get('alpha', 1.0), linewidth=2,
+                   label=kwargs.get('label', ''))
+        return
+    try:
+        ax.hist(data, bins=min(100, max(1, len(data) // 10)), **kwargs)
+    except (ValueError, OverflowError):
+        ax.axvline(float(data.mean()), color=kwargs.get('color', 'gray'),
+                   alpha=kwargs.get('alpha', 1.0), linewidth=2,
+                   label=kwargs.get('label', ''))
 
 
 # ---------------------------------------------------------------------------
@@ -521,7 +709,7 @@ def _plot_similarity_analysis(token_sims, sample_sims, view_names, run_tag):
     # Panel 1: token-level histogram
     ax = axes[0]
     for k, label, col in zip(pair_keys, pair_labels, colors):
-        ax.hist(token_sims[k], bins=80, alpha=0.5, label=label, color=col, density=True)
+        _safe_hist(ax, token_sims[k], alpha=0.5, label=label, color=col, density=True)
         ax.axvline(token_sims[k].mean(), color=col, linestyle='--', linewidth=1.5,
                    label=f'  mean={token_sims[k].mean():.3f}')
     ax.set_xlabel('Cosine similarity', fontsize=9)
@@ -568,7 +756,7 @@ def _plot_similarity_analysis(token_sims, sample_sims, view_names, run_tag):
     out = os.path.join(PLOT_DIR, f'similarity_{run_tag}.png')
     fig.savefig(out, dpi=150, bbox_inches='tight')
     print(f'Saved: {out}')
-    plt.show()
+    plt.close()
 
 
 def _plot_dot_products(dot_products, norms, view_names, run_tag):
@@ -593,7 +781,7 @@ def _plot_dot_products(dot_products, norms, view_names, run_tag):
     # Panel 1: dot product distributions
     ax = axes[0]
     for k, label, col in zip(pair_keys, pair_labels, colors_pair):
-        ax.hist(dot_products[k], bins=80, alpha=0.5, label=label, color=col, density=True)
+        _safe_hist(ax, dot_products[k], alpha=0.5, label=label, color=col, density=True)
         ax.axvline(dot_products[k].mean(), color=col, linestyle='--', linewidth=1.5,
                    label=f'  mean={dot_products[k].mean():.2f}')
     ax.axvline(0, color='black', linewidth=0.8, linestyle=':')
@@ -608,8 +796,8 @@ def _plot_dot_products(dot_products, norms, view_names, run_tag):
     ax = axes[1]
     for k, col in zip(norm_keys, colors_view):
         label = view_names[norm_keys.index(k)]
-        ax.hist(norms[k], bins=80, alpha=0.5, label=f'{label}  (mean={norms[k].mean():.2f})',
-                color=col, density=True)
+        _safe_hist(ax, norms[k], alpha=0.5, label=f'{label}  (mean={norms[k].mean():.2f})',
+                   color=col, density=True)
     ax.set_xlabel('L2 norm  ‖h‖', fontsize=9)
     ax.set_ylabel('Density', fontsize=9)
     ax.set_title('Embedding norms per view\n'
@@ -621,7 +809,7 @@ def _plot_dot_products(dot_products, norms, view_names, run_tag):
     out = os.path.join(PLOT_DIR, f'dotproducts_{run_tag}.png')
     fig.savefig(out, dpi=150, bbox_inches='tight')
     print(f'Saved: {out}')
-    plt.show()
+    plt.close()
 
 
 # ---------------------------------------------------------------------------
@@ -700,7 +888,7 @@ def _plot_pca_scatter(encoder, loader, view_names, run_tag, max_tokens=2000):
     out = os.path.join(PLOT_DIR, f'pca_{run_tag}.png')
     fig.savefig(out, dpi=150, bbox_inches='tight')
     print(f'Saved: {out}')
-    plt.show()
+    plt.close()
 
 
 # ---------------------------------------------------------------------------
@@ -759,14 +947,21 @@ def run_single(ckpt_path):
     out = os.path.join(PLOT_DIR, f'attention_{RUN_TAG}.png')
     plt.savefig(out, dpi=150, bbox_inches='tight')
     print(f'Saved: {out}')
-    plt.show()
+    plt.close()
 
-    # Investigation 1: pre-softmax logit analysis
+    # Investigation 1: pre-softmax logit analysis (standard IL) or bilinear score analysis
     result = _extract_pre_softmax_logits(encoder, loader)
     if result is not None:
         all_logits, n_heads = result
         _plot_logit_analysis(all_logits, n_heads,
                              ['xt', args.view2, args.view3], RUN_TAG)
+
+    # Investigation 1b: bilinear score analysis
+    bil_result = _extract_bilinear_scores(encoder, loader)
+    if bil_result is not None:
+        bil_scores, bil_attn = bil_result
+        _plot_bilinear_analysis(bil_scores, bil_attn,
+                                ['xt', args.view2, args.view3], RUN_TAG)
 
     # Investigation 2: view embedding similarity + dot products
     token_sims, sample_sims, dot_products, norms = _run_similarity_analysis(encoder, loader)
@@ -798,7 +993,7 @@ def run_single(ckpt_path):
         out2 = os.path.join(PLOT_DIR, f'attention_{RUN_TAG}_perhead.png')
         plt.savefig(out2, dpi=150, bbox_inches='tight')
         print(f'Saved: {out2}')
-        plt.show()
+        plt.close()
 
 
 # ---------------------------------------------------------------------------
@@ -874,7 +1069,7 @@ def run_evolution(epoch_ckpt_dir):
     out = os.path.join(PLOT_DIR, f'attention_{RUN_TAG}_evolution.png')
     plt.savefig(out, dpi=150, bbox_inches='tight')
     print(f'Saved: {out}')
-    plt.show()
+    plt.close()
 
 
 # ---------------------------------------------------------------------------

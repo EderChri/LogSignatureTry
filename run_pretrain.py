@@ -69,17 +69,27 @@ def _logsig_suffix(args) -> str:
         if mode == 'window':
             base = f'_win{wsiz}'
         else:
-            smoothing = getattr(args, 'logsig_smoothing', 'tukey')
+            smoothing    = getattr(args, 'logsig_smoothing', 'tukey')
+            smooth_param = getattr(args, 'logsig_smooth_param', 0.5)
+            msp          = getattr(args, 'logsig_multi_smooth_params', None)
             base = f'_{smoothing}{wsiz}'   # e.g. _tukey32  _ema16
+            if msp:
+                k = len([p.strip() for p in msp.split(',')])
+                base += f'_msp{k}'
+            elif smooth_param != 0.5:
+                base += f'_sp{smooth_param}'
     stride = getattr(args, 'logsig_stride', 1)
     gt     = getattr(args, 'logsig_global_time', False)
     pool   = getattr(args, 'logsig_pool', 'auto')
+    depth  = getattr(args, 'logsig_depth', 2)
     if stride > 1:
         base += f'_s{stride}'
     if gt:
         base += '_gt'
     if pool != 'auto':
         base += f'_p{pool}'   # e.g. _plast  _pmean
+    if depth != 2:
+        base += f'_d{depth}'
     return base
 
 _lsig_suffix = _logsig_suffix(args)
@@ -149,9 +159,11 @@ _ls_smooth = getattr(args, 'logsig_smoothing', 'tukey')
 _ls_sp     = getattr(args, 'logsig_smooth_param', 0.5)
 _ls_stride = getattr(args, 'logsig_stride', 1)
 _ls_gt     = getattr(args, 'logsig_global_time', False)
+_ls_msp    = getattr(args, 'logsig_multi_smooth_params', None)
+_msp_key   = ('_msp' + _ls_msp.replace(',', '-')) if _ls_msp else ''
 _logsig_cache_key = (
     f'{args.data_name}_d{args.logsig_depth}_{_ls_mode}'
-    f'_w{_ls_wsiz}_s{_ls_stride}_{_ls_smooth}_sp{_ls_sp}_gt{int(_ls_gt)}'
+    f'_w{_ls_wsiz}_s{_ls_stride}_{_ls_smooth}_sp{_ls_sp}_gt{int(_ls_gt)}{_msp_key}'
 )
 preprocessed_data = preprocess_data(
     X_train_intp, X_train_intp, views=views,
@@ -159,6 +171,7 @@ preprocessed_data = preprocess_data(
     logsig_mode=_ls_mode, logsig_window_size=_ls_wsiz,
     logsig_smoothing=_ls_smooth, logsig_smooth_param=_ls_sp,
     logsig_stride=_ls_stride, logsig_global_time=_ls_gt,
+    logsig_multi_smooth_params=[float(p) for p in _ls_msp.split(',')] if _ls_msp else None,
     logsig_cache_key=_logsig_cache_key,
 )
 X_train_intp_v1, _, _, _ = preprocessed_data['v1']
@@ -193,8 +206,9 @@ if args.num_feature > 64:
     args.num_feature = 64
 
 _gt = getattr(args, 'logsig_global_time', False)
-args.num_feature_v2 = get_view_num_features(args.view2, args.num_feature, args.logsig_depth, _gt)
-args.num_feature_v3 = get_view_num_features(args.view3, args.num_feature, args.logsig_depth, _gt)
+_msp_list = [float(p) for p in _ls_msp.split(',')] if _ls_msp else None
+args.num_feature_v2 = get_view_num_features(args.view2, args.num_feature, args.logsig_depth, _gt, _msp_list)
+args.num_feature_v3 = get_view_num_features(args.view3, args.num_feature, args.logsig_depth, _gt, _msp_list)
 
 if torch.cuda.device_count() > 1:
     encoder = Encoder(args)

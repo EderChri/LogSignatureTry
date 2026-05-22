@@ -28,11 +28,12 @@ def get_args_parser():
                         help='Remove the residual connection in InteractionLayer, forcing '
                              'all information to flow through cross-view attention')
     parser.add_argument('--interaction_type', default='attention', type=str,
-                        choices=['attention', 'view_embed', 'bilinear'],
+                        choices=['attention', 'view_embed', 'bilinear', 'cross_time'],
                         help='InteractionLayer variant: '
-                             'attention (default, standard shared-W_k MHA), '
+                             'attention (default, cross-feature MHA at each timestep), '
                              'view_embed (learnable per-view offset added before MHA), '
-                             'bilinear (asymmetric per-pair W_ij bilinear score)')
+                             'bilinear (asymmetric per-pair W_ij bilinear score), '
+                             'cross_time (original-paper: temporal self-attn per view, no cross-view)')
     parser.add_argument('--feature', default='hidden', type=str)
 
     # Training parameters
@@ -99,6 +100,11 @@ def get_args_parser():
                              'auto (default): last-token for mlp_logsig+stream, mean otherwise. '
                              'last: always last-token for logsig views (override for ablation). '
                              'mean: always mean-pool for logsig views (override for ablation).')
+    logsig.add_argument('--logsig_multi_smooth_params', default=None, type=str,
+                        help='Comma-separated Tukey alpha values for multi-param window_smooth. '
+                             'E.g. "0.25,0.5,0.75" computes one log-signature per alpha and '
+                             'concatenates them along the feature dim (output = K × C_sig). '
+                             'Only effective in window_smooth mode. Overrides --logsig_smooth_param.')
 
     return parser
 

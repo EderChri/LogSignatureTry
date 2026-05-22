@@ -76,21 +76,33 @@ def _logsig_suffix(args) -> str:
         if mode == 'window':
             base = f'_win{wsiz}'
         else:
-            smoothing = getattr(args, 'logsig_smoothing', 'tukey')
+            smoothing    = getattr(args, 'logsig_smoothing', 'tukey')
+            smooth_param = getattr(args, 'logsig_smooth_param', 0.5)
+            msp          = getattr(args, 'logsig_multi_smooth_params', None)
             base = f'_{smoothing}{wsiz}'
+            if msp:
+                k = len([p.strip() for p in msp.split(',')])
+                base += f'_msp{k}'
+            elif smooth_param != 0.5:
+                base += f'_sp{smooth_param}'
     stride = getattr(args, 'logsig_stride', 1)
     gt     = getattr(args, 'logsig_global_time', False)
     pool   = getattr(args, 'logsig_pool', 'auto')
+    depth  = getattr(args, 'logsig_depth', 2)
     if stride > 1:
         base += f'_s{stride}'
     if gt:
         base += '_gt'
     if pool != 'auto':
         base += f'_p{pool}'
+    if depth != 2:
+        base += f'_d{depth}'
     return base
 
 
 _lsig_suffix = _logsig_suffix(args)
+_il_suffix   = '' if getattr(args, 'interaction_type', 'attention') == 'attention' \
+               else f'_il{args.interaction_type.replace("_", "")}'
 
 # 2-view: xt + view2 only
 views = ('xt', args.view2)
@@ -108,14 +120,14 @@ args.horizon_len = int(args.data_name.split('_')[4])
 _data_tag = f'{args.data_name}-full' if getattr(args, 'full_training', False) else args.data_name
 output_file = (f'out_pretrain/{args.data_name}/'
                f'{_data_tag}_v2{args.view2}_nview'
-               f'_ep{args.epochs_pretrain}_{args.seed}{_enc_suffix}{_lsig_suffix}')
+               f'_ep{args.epochs_pretrain}_{args.seed}{_enc_suffix}{_lsig_suffix}{_il_suffix}')
 
 if os.path.exists(output_file):
     print(f'Output {output_file} already exists. Skipping.')
     sys.exit(0)
 
 resume_ckpt_path = (f'out_pretrain/.resume_{args.data_name}_v2{args.view2}_nview'
-                    f'_ep{args.epochs_pretrain}_{args.seed}{_enc_suffix}{_lsig_suffix}.pth')
+                    f'_ep{args.epochs_pretrain}_{args.seed}{_enc_suffix}{_lsig_suffix}{_il_suffix}.pth')
 
 # Load data
 print(f'Loading data: preprocessed_data/{args.data_name}.pkl', flush=True)
@@ -136,7 +148,9 @@ _gt = getattr(args, 'logsig_global_time', False)
 if args.num_feature > 64:
     args.num_feature = 64
 
-args.num_feature_v2 = get_view_num_features(args.view2, args.num_feature, args.logsig_depth, _gt)
+_ls_msp   = getattr(args, 'logsig_multi_smooth_params', None)
+_msp_list = [float(p) for p in _ls_msp.split(',')] if _ls_msp else None
+args.num_feature_v2 = get_view_num_features(args.view2, args.num_feature, args.logsig_depth, _gt, _msp_list)
 # ClassifierNView uses args.loss_type for fc input size; always ALL for nview
 args.loss_type = 'ALL'
 args.num_views = 2
@@ -148,9 +162,11 @@ _ls_wsiz   = getattr(args, 'logsig_window_size', 32)
 _ls_smooth = getattr(args, 'logsig_smoothing', 'tukey')
 _ls_sp     = getattr(args, 'logsig_smooth_param', 0.5)
 _ls_stride = getattr(args, 'logsig_stride', 1)
+_ls_msp    = getattr(args, 'logsig_multi_smooth_params', None)
+_msp_key   = ('_msp' + _ls_msp.replace(',', '-')) if _ls_msp else ''
 _logsig_cache_key = (
     f'{args.data_name}_d{args.logsig_depth}_{_ls_mode}'
-    f'_w{_ls_wsiz}_s{_ls_stride}_{_ls_smooth}_sp{_ls_sp}_gt{int(_gt)}'
+    f'_w{_ls_wsiz}_s{_ls_stride}_{_ls_smooth}_sp{_ls_sp}_gt{int(_gt)}{_msp_key}'
 )
 preprocessed = preprocess_data(
     X_train_intp, X_train_intp, views=views,
@@ -158,6 +174,7 @@ preprocessed = preprocess_data(
     logsig_mode=_ls_mode, logsig_window_size=_ls_wsiz,
     logsig_smoothing=_ls_smooth, logsig_smooth_param=_ls_sp,
     logsig_stride=_ls_stride, logsig_global_time=_gt,
+    logsig_multi_smooth_params=[float(p) for p in _ls_msp.split(',')] if _ls_msp else None,
     logsig_cache_key=_logsig_cache_key,
 )
 v1_tr = preprocessed['v1'][0]
@@ -183,7 +200,7 @@ os.makedirs(f'out_pretrain/{args.data_name}', exist_ok=True)
 summary_file  = f'out_pretrain/{args.data_name}/final_pretrain_summary.tsv'
 best_model_path = (f'model_pretrain/{args.data_name}/'
                    f'{args.data_name}_v2{args.view2}_nview'
-                   f'_ep{args.epochs_pretrain}_{args.seed}{_enc_suffix}{_lsig_suffix}.pth')
+                   f'_ep{args.epochs_pretrain}_{args.seed}{_enc_suffix}{_lsig_suffix}{_il_suffix}.pth')
 
 in_dims = [args.num_feature, args.num_feature_v2]
 encoder = EncoderNView(args, views=list(views), in_dims=in_dims).to(device)

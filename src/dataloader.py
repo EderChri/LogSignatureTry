@@ -79,6 +79,7 @@ def get_logsig(
     smooth_param: float = 0.5,
     stride: int = 1,
     global_time: bool = False,
+    multi_smooth_params: list = None,
 ) -> torch.Tensor:
     """Log signature view of the time-augmented path.
 
@@ -110,20 +111,28 @@ def get_logsig(
         mode:         'stream' | 'window' | 'window_smooth'
         window_size:  sliding window length W (used for window modes)
         smoothing:    'tukey' | 'ema'  (used for window_smooth mode)
-        smooth_param: tapering ratio for tukey or alpha decay for ema
-        stride:       compute a signature every stride steps; output length
-                      is L // stride.  Ignored in stream mode.
-        global_time:  if True, append the global position t/L as an extra
-                      channel, giving the MLP branch a sense of absolute
-                      position without a learned PE.
+        smooth_param:        tapering ratio for tukey or alpha decay for ema
+        stride:              compute a signature every stride steps; output length
+                             is L // stride.  Ignored in stream mode.
+        global_time:         if True, append the global position t/L as an extra
+                             channel, giving the MLP branch a sense of absolute
+                             position without a learned PE.
+        multi_smooth_params: list of Tukey alpha floats.  When set and mode is
+                             'window_smooth', computes one signature per alpha and
+                             concatenates along the feature dim (K × C_sig).
+                             Overrides smooth_param.  Ignored for other modes.
 
     Returns:
-        stream mode:  [N, L,       C(+1)]  where C = logsigdim(D+1, depth)
-        window modes: [N, L//stride, C(+1)]
+        stream mode:  [N, L,         C(+1)]  where C = logsigdim(D+1, depth)
+        window modes: [N, L//stride, K*C(+1)] (K=1 when multi_smooth_params is None)
     """
     N, L, D = X.shape
     C_sig = logsigdim(D + 1, depth)
-    C = C_sig + 1 if global_time else C_sig
+    _multi = (multi_smooth_params is not None
+              and mode == 'window_smooth'
+              and len(multi_smooth_params) > 0)
+    K = len(multi_smooth_params) if _multi else 1
+    C = K * C_sig + (1 if global_time else 0)
 
     if mode == 'stream':
         t = torch.linspace(0, 1, L, dtype=X.dtype, device=X.device)
@@ -156,18 +165,31 @@ def get_logsig(
 
         W = seg.shape[1]  # == window_size after padding
 
-        if mode == 'window_smooth':
-            if smoothing == 'tukey':
-                weights = _tukey_weights(W, smooth_param, seg.dtype, seg.device)
-                seg = seg * weights.view(1, W, 1)
-            else:  # ema
-                seg = _smooth_ema(seg, smooth_param)
-
-        # Local time in [0, 1] within the window
+        # Local time in [0, 1] within the window (shared across all param variants)
         seg_t = torch.linspace(0, 1, W, dtype=X.dtype, device=X.device)
         seg_t = seg_t.view(1, W, 1).expand(N, -1, -1)
-        seg_full = torch.cat([seg_t, seg], dim=-1)            # [N, W, D+1]
-        sig_val = log_signature(seg_full, depth)              # [N, C_sig]
+
+        if _multi:
+            parts = []
+            for alpha in multi_smooth_params:
+                seg_a = seg.clone()
+                if smoothing == 'tukey':
+                    weights = _tukey_weights(W, alpha, seg.dtype, seg.device)
+                    seg_a = seg_a * weights.view(1, W, 1)
+                else:
+                    seg_a = _smooth_ema(seg_a, alpha)
+                seg_full = torch.cat([seg_t, seg_a], dim=-1)
+                parts.append(log_signature(seg_full, depth))  # [N, C_sig]
+            sig_val = torch.cat(parts, dim=-1)                # [N, K*C_sig]
+        else:
+            if mode == 'window_smooth':
+                if smoothing == 'tukey':
+                    weights = _tukey_weights(W, smooth_param, seg.dtype, seg.device)
+                    seg = seg * weights.view(1, W, 1)
+                else:
+                    seg = _smooth_ema(seg, smooth_param)
+            seg_full = torch.cat([seg_t, seg], dim=-1)        # [N, W, D+1]
+            sig_val = log_signature(seg_full, depth)          # [N, C_sig]
 
         if global_time:
             t_g = torch.full((N, 1), (end - 1) / max(L - 1, 1),
@@ -180,12 +202,15 @@ def get_logsig(
 
 
 def get_view_num_features(view: str, num_feature: int, logsig_depth: int,
-                          global_time: bool = False) -> int:
+                          global_time: bool = False,
+                          multi_smooth_params=None) -> int:
     """Input feature dimension produced by the given view transform."""
     if view in ('xt', 'dx', 'xf'):
         return num_feature
     elif view == 'logsig':
         c = logsigdim(num_feature + 1, logsig_depth)
+        if multi_smooth_params is not None and len(multi_smooth_params) > 0:
+            c *= len(multi_smooth_params)
         return c + 1 if global_time else c
     else:
         raise ValueError(f"Unknown view '{view}'. Choose from: xt, dx, xf, logsig")
@@ -195,6 +220,7 @@ def preprocess_data(X_train, X_test, views=('xt', 'dx', 'xf'), logsig_depth=2,
                     logsig_mode='stream', logsig_window_size=32,
                     logsig_smoothing='tukey', logsig_smooth_param=0.5,
                     logsig_stride=1, logsig_global_time=False,
+                    logsig_multi_smooth_params=None,
                     time_as_feature=False,
                     logsig_cache_key=None):
     """Preprocess training and test data for the requested views.
@@ -239,6 +265,7 @@ def preprocess_data(X_train, X_test, views=('xt', 'dx', 'xf'), logsig_depth=2,
                 window_size=logsig_window_size, smoothing=logsig_smoothing,
                 smooth_param=logsig_smooth_param, stride=logsig_stride,
                 global_time=logsig_global_time,
+                multi_smooth_params=logsig_multi_smooth_params,
             )
             if logsig_cache_key:
                 _cdir = 'preprocessed_data/.logsig_cache'
