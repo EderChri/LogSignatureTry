@@ -161,9 +161,11 @@ _ls_stride = getattr(args, 'logsig_stride', 1)
 _ls_gt     = getattr(args, 'logsig_global_time', False)
 _ls_msp    = getattr(args, 'logsig_multi_smooth_params', None)
 _msp_key   = ('_msp' + _ls_msp.replace(',', '-')) if _ls_msp else ''
+_pca_k     = getattr(args, 'pca_components', None)
+_pca_key   = f'_pca{_pca_k}' if _pca_k else ''
 _logsig_cache_key = (
     f'{args.data_name}_d{args.logsig_depth}_{_ls_mode}'
-    f'_w{_ls_wsiz}_s{_ls_stride}_{_ls_smooth}_sp{_ls_sp}_gt{int(_ls_gt)}{_msp_key}'
+    f'_w{_ls_wsiz}_s{_ls_stride}_{_ls_smooth}_sp{_ls_sp}_gt{int(_ls_gt)}{_msp_key}{_pca_key}'
 )
 preprocessed_data = preprocess_data(
     X_train_intp, X_train_intp, views=views,
@@ -173,6 +175,7 @@ preprocessed_data = preprocess_data(
     logsig_stride=_ls_stride, logsig_global_time=_ls_gt,
     logsig_multi_smooth_params=[float(p) for p in _ls_msp.split(',')] if _ls_msp else None,
     logsig_cache_key=_logsig_cache_key,
+    pca_components=_pca_k,
 )
 X_train_intp_v1, _, _, _ = preprocessed_data['v1']
 X_train_intp_v2, _, _, _ = preprocessed_data['v2']
@@ -201,7 +204,9 @@ os.makedirs(f'out_pretrain', exist_ok=True)
 os.makedirs(f'out_pretrain/{args.data_name}', exist_ok=True)
 summary_file = f'out_pretrain/{args.data_name}/final_pretrain_summary.tsv'
 
-# Dimension reduction with PCA
+# Apply PCA dimension override before computing model architecture sizes
+if _pca_k is not None and _pca_k < args.num_feature:
+    args.num_feature = _pca_k
 if args.num_feature > 64:
     args.num_feature = 64
 

@@ -248,28 +248,30 @@ def read_interaction_tsv(path: str):
     return scores
 
 
-def read_tsv(path: str):
-    """Return dict (view_key, window, encoder) → list[float] for finetune rows."""
+def read_tsv(*paths: str):
+    """Return dict (view_key, window, encoder) → list[float] for finetune rows.
+    Accepts multiple paths; results are merged (lists concatenated)."""
     scores = {}
-    try:
-        with open(path) as f:
-            for line in f:
-                line = line.rstrip('\n')
-                if not line or line.startswith('#'):
-                    continue
-                parts = line.split('\t')
-                if len(parts) < 2:
-                    continue
-                parsed = parse_finetune_row(parts[0])
-                if parsed is None:
-                    continue
-                try:
-                    score = float(parts[1])
-                except ValueError:
-                    continue
-                scores.setdefault(parsed, []).append(score)
-    except FileNotFoundError:
-        pass
+    for path in paths:
+        try:
+            with open(path) as f:
+                for line in f:
+                    line = line.rstrip('\n')
+                    if not line or line.startswith('#'):
+                        continue
+                    parts = line.split('\t')
+                    if len(parts) < 2:
+                        continue
+                    parsed = parse_finetune_row(parts[0])
+                    if parsed is None:
+                        continue
+                    try:
+                        score = float(parts[1])
+                    except ValueError:
+                        continue
+                    scores.setdefault(parsed, []).append(score)
+        except FileNotFoundError:
+            pass
     return scores
 
 
@@ -312,28 +314,30 @@ def parse_bilinear_row(name: str):
     return view_key, window, il
 
 
-def read_bilinear_tsv(path: str):
-    """Return dict (view_key, window, il) → list[float]."""
+def read_bilinear_tsv(*paths: str):
+    """Return dict (view_key, window, il) → list[float].
+    Accepts multiple paths; results are merged (lists concatenated)."""
     scores = {}
-    try:
-        with open(path) as f:
-            for line in f:
-                line = line.rstrip('\n')
-                if not line or line.startswith('#'):
-                    continue
-                parts = line.split('\t')
-                if len(parts) < 2:
-                    continue
-                parsed = parse_bilinear_row(parts[0])
-                if parsed is None:
-                    continue
-                try:
-                    score = float(parts[1])
-                except ValueError:
-                    continue
-                scores.setdefault(parsed, []).append(score)
-    except FileNotFoundError:
-        pass
+    for path in paths:
+        try:
+            with open(path) as f:
+                for line in f:
+                    line = line.rstrip('\n')
+                    if not line or line.startswith('#'):
+                        continue
+                    parts = line.split('\t')
+                    if len(parts) < 2:
+                        continue
+                    parsed = parse_bilinear_row(parts[0])
+                    if parsed is None:
+                        continue
+                    try:
+                        score = float(parts[1])
+                    except ValueError:
+                        continue
+                    scores.setdefault(parsed, []).append(score)
+        except FileNotFoundError:
+            pass
     return scores
 
 # ---------------------------------------------------------------------------
@@ -341,9 +345,11 @@ def read_bilinear_tsv(path: str):
 # ---------------------------------------------------------------------------
 
 epilepsy_scores = read_tsv(
-    'out_finetune/_DA_Epilepsy_256_00/final_test_metric_summary.tsv')
+    'out_finetune/_DA_Epilepsy_256_00/final_test_metric_summary.tsv',
+    'out_finetune_pre_canada_old/_DA_Epilepsy_256_00/final_test_metric_summary.tsv')
 har_scores = read_tsv(
-    'out_finetune/_DA_HAR70plus_256_00/final_test_metric_summary.tsv')
+    'out_finetune/_DA_HAR70plus_256_00/final_test_metric_summary.tsv',
+    'out_finetune_pre_canada_old/_DA_HAR70plus_256_00/final_test_metric_summary.tsv')
 
 panels = [
     ('Epilepsy  (SleepEEG pretrain)', epilepsy_scores),
@@ -573,9 +579,11 @@ plt.show()
 # ---------------------------------------------------------------------------
 
 bil_epilepsy = read_bilinear_tsv(
-    'out_finetune/_DA_Epilepsy_256_00/final_test_metric_summary.tsv')
+    'out_finetune/_DA_Epilepsy_256_00/final_test_metric_summary.tsv',
+    'out_finetune_pre_canada_old/_DA_Epilepsy_256_00/final_test_metric_summary.tsv')
 bil_har = read_bilinear_tsv(
-    'out_finetune/_DA_HAR70plus_256_00/final_test_metric_summary.tsv')
+    'out_finetune/_DA_HAR70plus_256_00/final_test_metric_summary.tsv',
+    'out_finetune_pre_canada_old/_DA_HAR70plus_256_00/final_test_metric_summary.tsv')
 
 bil_panels = [
     ('Epilepsy  (SleepEEG pretrain)', bil_epilepsy, epilepsy_scores),

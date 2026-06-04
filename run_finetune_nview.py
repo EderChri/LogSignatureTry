@@ -111,6 +111,9 @@ args.context_len = int(args.data_name.split('_')[3])
 args.horizon_len = int(args.data_name.split('_')[4])
 
 # Feature dims
+_pca_k = getattr(args, 'pca_components', None)
+if _pca_k is not None and _pca_k < args.num_feature:
+    args.num_feature = _pca_k
 if args.num_feature > 64:
     args.num_feature = 64
 _gt     = getattr(args, 'logsig_global_time', False)
@@ -151,6 +154,7 @@ _logsig_kw = dict(
     logsig_stride=getattr(args, 'logsig_stride', 1),
     logsig_global_time=_gt,
     logsig_multi_smooth_params=[float(p) for p in _ft_msp.split(',')] if _ft_msp else None,
+    pca_components=_pca_k,
 )
 
 pre_tv = preprocess_data(X_tr, X_va, views=views, **_logsig_kw)

@@ -157,7 +157,9 @@ _launch() {
   local gid="${GPU_LIST[$(( job_index % num_gpus ))]}"
   _wait_for_gpu "$gid"
   echo "Running [GPU ${gid}]: ${tag}"
-  TQDM_DISABLE=${DISABLE_TQDM} CUDA_VISIBLE_DEVICES=$gid "${cmd[@]}" 2>&1 | tee "$log"
+  TQDM_DISABLE=${DISABLE_TQDM} CUDA_VISIBLE_DEVICES=$gid \
+    PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
+    "${cmd[@]}" 2>&1 | tee "$log"
   job_index=$(( job_index + 1 ))
 }
 

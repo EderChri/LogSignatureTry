@@ -1,3 +1,4 @@
+import fcntl
 import os
 import torch
 import torch.fft as fft
@@ -222,12 +223,15 @@ def preprocess_data(X_train, X_test, views=('xt', 'dx', 'xf'), logsig_depth=2,
                     logsig_stride=1, logsig_global_time=False,
                     logsig_multi_smooth_params=None,
                     time_as_feature=False,
-                    logsig_cache_key=None):
+                    logsig_cache_key=None,
+                    pca_components=None):
     """Preprocess training and test data for the requested views.
 
     Args:
-        views:        tuple of three view names; first entry must be 'xt'.
-        logsig_depth: truncation depth used when a view is 'logsig'.
+        views:          tuple of three view names; first entry must be 'xt'.
+        logsig_depth:   truncation depth used when a view is 'logsig'.
+        pca_components: if set, reduce input channels to this many PCA components
+                        (fit on training data) before computing any view.
 
     Returns:
         dict with keys 'v1', 'v2', 'v3', each a tuple
@@ -235,6 +239,24 @@ def preprocess_data(X_train, X_test, views=('xt', 'dx', 'xf'), logsig_depth=2,
     """
     # Normalise time-domain data — used as input for all other transforms
     X_train_xt, X_test_xt, mean_xt, std_xt = normalize(X_train, X_test)
+
+    # Optional PCA dimensionality reduction (fit on train, applied to train+test)
+    if pca_components is not None and pca_components < X_train_xt.shape[-1]:
+        from sklearn.decomposition import PCA as _PCA
+        N_tr, L, D = X_train_xt.shape
+        N_te = X_test_xt.shape[0]
+        pca = _PCA(n_components=pca_components)
+        pca.fit(X_train_xt.reshape(-1, D).numpy())
+        X_train_xt = torch.from_numpy(
+            pca.transform(X_train_xt.reshape(-1, D).numpy())
+            .reshape(N_tr, L, pca_components)
+        ).to(X_train.dtype)
+        X_test_xt = torch.from_numpy(
+            pca.transform(X_test_xt.reshape(-1, D).numpy())
+            .reshape(N_te, L, pca_components)
+        ).to(X_train.dtype)
+        X_train_xt, X_test_xt, mean_xt, std_xt = normalize(X_train_xt, X_test_xt)
+        print(f'[PCA] {D} → {pca_components} components', flush=True)
 
     results = {}
     for i, view in enumerate(views):
@@ -272,16 +294,22 @@ def preprocess_data(X_train, X_test, views=('xt', 'dx', 'xf'), logsig_depth=2,
                 os.makedirs(_cdir, exist_ok=True)
                 _ctr = f'{_cdir}/{logsig_cache_key}_train.pt'
                 _cte = f'{_cdir}/{logsig_cache_key}_test.pt'
-                if os.path.exists(_ctr) and os.path.exists(_cte):
-                    print(f'[logsig cache hit] {_ctr}', flush=True)
-                    data_tr = torch.load(_ctr, weights_only=True)
-                    data_te = torch.load(_cte, weights_only=True)
-                else:
-                    print(f'[logsig cache miss — computing] {_ctr}', flush=True)
-                    data_tr = get_logsig(X_train_xt, **_logsig_kw)
-                    data_te = get_logsig(X_test_xt,  **_logsig_kw)
-                    torch.save(data_tr, _ctr)
-                    torch.save(data_te, _cte)
+                _lock_path = f'{_cdir}/{logsig_cache_key}.lock'
+                with open(_lock_path, 'w') as _lock_f:
+                    fcntl.flock(_lock_f, fcntl.LOCK_EX)
+                    if os.path.exists(_ctr) and os.path.exists(_cte):
+                        print(f'[logsig cache hit] {_ctr}', flush=True)
+                        data_tr = torch.load(_ctr, weights_only=True)
+                        data_te = torch.load(_cte, weights_only=True)
+                    else:
+                        print(f'[logsig cache miss — computing] {_ctr}', flush=True)
+                        data_tr = get_logsig(X_train_xt, **_logsig_kw)
+                        data_te = get_logsig(X_test_xt,  **_logsig_kw)
+                        torch.save(data_tr, f'{_ctr}.tmp')
+                        torch.save(data_te, f'{_cte}.tmp')
+                        os.rename(f'{_ctr}.tmp', _ctr)
+                        os.rename(f'{_cte}.tmp', _cte)
+                    fcntl.flock(_lock_f, fcntl.LOCK_UN)
             else:
                 data_tr = get_logsig(X_train_xt, **_logsig_kw)
                 data_te = get_logsig(X_test_xt,  **_logsig_kw)

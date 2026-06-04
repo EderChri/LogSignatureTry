@@ -209,6 +209,187 @@ def preprocess_HAR70plus(data_dir: str = 'har70plus'):
 
 
 # ---------------------------------------------------------------------------
+# capture24 (unsupervised pretrain — no labels used)
+# ---------------------------------------------------------------------------
+
+CAPTURE24_ACCEL_COLS = ['x', 'y', 'z']
+
+
+def _window_capture24(values: np.ndarray, seq_len: int, stride: int,
+                      rng: np.random.Generator, max_windows: int) -> np.ndarray:
+    """Slide a window over a 2-D (N_rows, 3) array, return (K, 3, seq_len)."""
+    n_rows = len(values)
+    starts = np.arange(0, n_rows - seq_len + 1, stride)
+    if len(starts) == 0:
+        return np.empty((0, len(CAPTURE24_ACCEL_COLS), seq_len), dtype=np.float32)
+    windows = np.stack([values[s:s + seq_len].T for s in starts])  # (K, 3, seq_len)
+    # Drop windows that still contain NaN after row-level cleaning
+    valid = ~np.isnan(windows).any(axis=(1, 2))
+    windows = windows[valid]
+    if len(windows) > max_windows:
+        idx = rng.choice(len(windows), size=max_windows, replace=False)
+        windows = windows[idx]
+    return windows.astype(np.float32)
+
+
+def preprocess_capture24(
+    data_dir: str = 'data/capture24',
+    seq_len: int = 256,
+    stride: int = 128,
+    max_per_participant: int = 2000,
+    rng_seed: int = 0,
+    mini: bool = False,
+    mini_n_subjects: int = 10,
+    mini_max_per: int = 25,
+    mini_rows_limit: int = 1_000_000,
+):
+    tag = 'capture24mini' if mini else 'capture24'
+    out = f'preprocessed_data/_DA_{tag}_256_00.pkl'
+    if os.path.exists(out):
+        print(f'Skipping {out}: already exists.')
+        return
+
+    files = sorted(glob.glob(os.path.join(data_dir, 'P*.csv.gz')))
+    if not files:
+        raise FileNotFoundError(f"No P*.csv.gz files found in '{data_dir}'")
+
+    if mini:
+        files = files[:mini_n_subjects]
+        max_per_participant = mini_max_per
+
+    print(f'capture24{"mini" if mini else ""}: processing {len(files)} participants '
+          f'(seq_len={seq_len}, stride={stride}, max_per_participant={max_per_participant})…')
+
+    all_windows = []
+    rng = np.random.default_rng(rng_seed)
+
+    for i, fpath in enumerate(files):
+        pid = os.path.basename(fpath).split('.')[0]
+        try:
+            # Read only as many rows as needed to yield max_per_participant windows.
+            # With stride=128 and seq_len=256, max windows ≈ (nrows - 256) / 128.
+            # Adding a 2× safety margin ensures we don't under-sample due to NaN drops.
+            nrows_limit = max_per_participant * stride * 2 + seq_len
+            kwargs = dict(usecols=CAPTURE24_ACCEL_COLS, low_memory=False, dtype=np.float32,
+                          nrows=mini_rows_limit if mini else nrows_limit)
+            df = pd.read_csv(fpath, compression='gzip', **kwargs)
+        except Exception as e:
+            print(f'  Warning: could not read {pid}: {e}')
+            continue
+
+        # Drop rows with any NaN in sensor columns before windowing
+        df = df.dropna(subset=CAPTURE24_ACCEL_COLS)
+        values = df[CAPTURE24_ACCEL_COLS].values  # (N, 3)
+
+        part_rng = np.random.default_rng(rng_seed + i)
+        windows = _window_capture24(values, seq_len, stride, part_rng, max_per_participant)
+
+        if len(windows):
+            all_windows.append(windows)
+
+        if (i + 1) % 10 == 0 or (i + 1) == len(files):
+            total_so_far = sum(len(w) for w in all_windows)
+            print(f'  [{i+1}/{len(files)}] {pid}: {len(windows)} windows  '
+                  f'(running total: {total_so_far:,})')
+
+    if not all_windows:
+        raise RuntimeError('No windows extracted from capture24 data.')
+
+    X_train = np.concatenate(all_windows, axis=0)  # (N, 3, seq_len)
+    y_train = np.zeros(len(X_train), dtype=np.int64)
+
+    D = len(CAPTURE24_ACCEL_COLS)
+    X_empty = np.empty((0, D, seq_len), dtype=np.float32)
+    y_empty = np.empty((0,), dtype=np.int64)
+
+    print(f'  X_train: {X_train.shape}  (dummy y — unsupervised pretrain)')
+    os.makedirs('preprocessed_data', exist_ok=True)
+    with open(out, 'wb') as f:
+        pickle.dump([X_train, None, None, y_train,
+                     X_empty, None, None, y_empty,
+                     X_empty, None, None, y_empty], f)
+    print(f'  Saved → {out}')
+
+
+# ---------------------------------------------------------------------------
+# Generic npy→pkl converter for finetune datasets
+# (WISDM, WISDM2, USC_HAD, Opportunity, Skoda)
+# ---------------------------------------------------------------------------
+
+_NPY_CONFIGS = {
+    # name: (npy_path, n_channels)  — n_channels not used here but documents expected D
+    'WISDM':       'data/WISDM/WISDM.npy',
+    'WISDM2':      'data/WISDM2/WISDM2.npy',
+    'USC_HAD':     'data/USC_HAD/USC_HAD.npy',
+    'Opportunity': 'data/Opportunity/Opportunity.npy',
+    'Skoda':       'data/Skoda/Skoda.npy',
+}
+
+# Fractions: ~17% train / 11% val / 72% test — matches HAR70plus subject ratios
+_NPY_TRAIN_FRAC = 0.17
+_NPY_VAL_FRAC   = 0.11
+
+
+def preprocess_npy_dataset(name: str, seq_len: int = 256, rng_seed: int = 0):
+    out = f'preprocessed_data/_DA_{name}_256_00.pkl'
+    if os.path.exists(out):
+        print(f'Skipping {out}: already exists.')
+        return
+
+    npy_path = _NPY_CONFIGS.get(name)
+    if npy_path is None:
+        raise ValueError(f'Unknown npy dataset: {name}')
+    if not os.path.exists(npy_path):
+        raise FileNotFoundError(f'npy file not found: {npy_path}')
+
+    data = np.load(npy_path, allow_pickle=True).item()
+    X_all = np.concatenate([data['train_data'], data['test_data']], axis=0)  # (N, D, L)
+    y_all = np.concatenate([data['train_label'], data['test_label']], axis=0)
+
+    # Remap labels to 0-indexed (e.g. USC_HAD is 1-12)
+    offset = int(y_all.min())
+    if offset != 0:
+        y_all = y_all - offset
+
+    # Resample sequence length if needed
+    if X_all.shape[2] != seq_len:
+        print(f'  Resampling {name} seq_len {X_all.shape[2]} → {seq_len}…')
+        X_all = get_same_len(X_all, seq_len)
+
+    # Stratified split: train / val / test
+    from sklearn.model_selection import train_test_split
+    n_total = len(X_all)
+    test_frac = 1.0 - _NPY_TRAIN_FRAC - _NPY_VAL_FRAC  # ~0.72
+    idx = np.arange(n_total)
+
+    idx_trainval, idx_test = train_test_split(
+        idx, test_size=test_frac, stratify=y_all, random_state=rng_seed)
+    # From the trainval portion, split off val
+    val_relative = _NPY_VAL_FRAC / (_NPY_TRAIN_FRAC + _NPY_VAL_FRAC)
+    idx_train, idx_val = train_test_split(
+        idx_trainval, test_size=val_relative, stratify=y_all[idx_trainval],
+        random_state=rng_seed)
+
+    X_tr, y_tr = X_all[idx_train], y_all[idx_train]
+    X_va, y_va = X_all[idx_val],   y_all[idx_val]
+    X_te, y_te = X_all[idx_test],  y_all[idx_test]
+
+    n = len(y_all)
+    print(f'{name}: {X_all.shape[1]}ch, seq_len={seq_len}, '
+          f'{len(y_tr)} train ({len(y_tr)/n:.1%}) / '
+          f'{len(y_va)} val ({len(y_va)/n:.1%}) / '
+          f'{len(y_te)} test ({len(y_te)/n:.1%}), '
+          f'{len(np.unique(y_tr))} train classes')
+
+    os.makedirs('preprocessed_data', exist_ok=True)
+    with open(out, 'wb') as f:
+        pickle.dump([X_tr, None, None, y_tr,
+                     X_va, None, None, y_va,
+                     X_te, None, None, y_te], f)
+    print(f'  Saved → {out}')
+
+
+# ---------------------------------------------------------------------------
 # Registry — maps CLI dataset name → callable
 # ---------------------------------------------------------------------------
 
@@ -218,8 +399,12 @@ DATASET_REGISTRY = {
     name: (lambda n=name: preprocess_domain_ts(n))
     for name in DOMAIN_TS_NAMES
 }
-DATASET_REGISTRY['HARTH']    = preprocess_HARTH
-DATASET_REGISTRY['HAR70plus'] = preprocess_HAR70plus
+DATASET_REGISTRY['HARTH']         = preprocess_HARTH
+DATASET_REGISTRY['HAR70plus']     = preprocess_HAR70plus
+DATASET_REGISTRY['capture24']     = preprocess_capture24
+DATASET_REGISTRY['capture24mini'] = lambda: preprocess_capture24(mini=True)
+for _npy_name in _NPY_CONFIGS:
+    DATASET_REGISTRY[_npy_name] = lambda n=_npy_name: preprocess_npy_dataset(n)
 
 
 # ---------------------------------------------------------------------------

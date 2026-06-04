@@ -140,6 +140,7 @@ y_test = torch.tensor(y_test)
 ##
 views = ('xt', args.view2, args.view3)
 _ft_msp = getattr(args, 'logsig_multi_smooth_params', None)
+_pca_k = getattr(args, 'pca_components', None)
 _logsig_kw = dict(
     logsig_depth=args.logsig_depth,
     logsig_mode=getattr(args, 'logsig_mode', 'stream'),
@@ -149,6 +150,7 @@ _logsig_kw = dict(
     logsig_stride=getattr(args, 'logsig_stride', 1),
     logsig_global_time=getattr(args, 'logsig_global_time', False),
     logsig_multi_smooth_params=[float(p) for p in _ft_msp.split(',')] if _ft_msp else None,
+    pca_components=_pca_k,
 )
 
 preprocessed_data = preprocess_data(X_train_intp, X_val_intp, views=views, **_logsig_kw)
@@ -177,7 +179,9 @@ os.makedirs(f'out_finetune', exist_ok=True)
 os.makedirs(f'out_finetune/{args.data_name}', exist_ok=True)
 summary_file = f'out_finetune/{args.data_name}/final_test_metric_summary.tsv'
 
-# Dimension reduction with PCA
+# Apply PCA dimension override before computing model architecture sizes
+if _pca_k is not None and _pca_k < args.num_feature:
+    args.num_feature = _pca_k
 if args.num_feature > 64:
     args.num_feature = 64
 

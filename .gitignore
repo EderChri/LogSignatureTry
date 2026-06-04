@@ -188,3 +188,6 @@ logs
 *.pdf
 *.png
 *.pkl
+*.zip
+capture24.zip
+data/

@@ -106,6 +106,12 @@ def get_args_parser():
                              'concatenates them along the feature dim (output = K × C_sig). '
                              'Only effective in window_smooth mode. Overrides --logsig_smooth_param.')
 
+    # Dimensionality reduction
+    parser.add_argument('--pca_components', default=None, type=int,
+                        help='If set, reduce input channels to this many PCA components before '
+                             'computing all views. Fit on training data only. Useful for '
+                             'high-dimensional datasets (e.g. Opportunity 113ch → 32, Skoda 60ch → 4).')
+
     return parser
 
 
