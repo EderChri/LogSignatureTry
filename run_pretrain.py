@@ -95,6 +95,7 @@ def _logsig_suffix(args) -> str:
 _lsig_suffix = _logsig_suffix(args)
 _il_suffix = '' if getattr(args, 'interaction_type', 'attention') == 'attention' \
              else f'_il{args.interaction_type.replace("_", "")}'
+_cv_suffix = '_cv' if getattr(args, 'cross_view_logsig', False) else ''
 
 print(
     f"Starting pretrain: data={args.data_name}, encoder={args.encoder_type}, "
@@ -105,14 +106,14 @@ print(
 
 ## Check if output already exists
 _data_tag = f'{args.data_name}-full' if args.full_training else args.data_name
-output_file = f'out_pretrain/{args.data_name}/{_data_tag}_v2{args.view2}_v3{args.view3}_ep{args.epochs_pretrain}_{args.seed}{_enc_suffix}{_lsig_suffix}{_il_suffix}'
+output_file = f'out_pretrain/{args.data_name}/{_data_tag}_v2{args.view2}_v3{args.view3}_ep{args.epochs_pretrain}_{args.seed}{_enc_suffix}{_lsig_suffix}{_il_suffix}{_cv_suffix}'
 
 if os.path.exists(output_file):
     print(f"Output file {output_file} already exists. Skipping this run.")
     sys.exit(0)
 
 # Resume checkpoint path for interrupted runs
-resume_ckpt_path = f'out_pretrain/.resume_{args.data_name}_v2{args.view2}_v3{args.view3}_ep{args.epochs_pretrain}_{args.seed}{_enc_suffix}{_lsig_suffix}{_il_suffix}.pth'
+resume_ckpt_path = f'out_pretrain/.resume_{args.data_name}_v2{args.view2}_v3{args.view3}_ep{args.epochs_pretrain}_{args.seed}{_enc_suffix}{_lsig_suffix}{_il_suffix}{_cv_suffix}.pth'
     
 #
 args.context_len = int(args.data_name.split('_')[-2])
@@ -242,8 +243,8 @@ scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(encoder_optimizer, mode='
 
 loss_list = []
 best_valid_loss = float('inf')
-best_model_path = f'model_pretrain/{args.data_name}/{args.data_name}_v2{args.view2}_v3{args.view3}_ep{args.epochs_pretrain}_{args.seed}{_enc_suffix}{_lsig_suffix}{_il_suffix}.pth'
-output_file = f'out_pretrain/{args.data_name}/{args.data_name}_v2{args.view2}_v3{args.view3}_ep{args.epochs_pretrain}_{args.seed}{_enc_suffix}{_lsig_suffix}{_il_suffix}'
+best_model_path = f'model_pretrain/{args.data_name}/{args.data_name}_v2{args.view2}_v3{args.view3}_ep{args.epochs_pretrain}_{args.seed}{_enc_suffix}{_lsig_suffix}{_il_suffix}{_cv_suffix}.pth'
+output_file = f'out_pretrain/{args.data_name}/{args.data_name}_v2{args.view2}_v3{args.view3}_ep{args.epochs_pretrain}_{args.seed}{_enc_suffix}{_lsig_suffix}{_il_suffix}{_cv_suffix}'
 
 # Early stopping parameters
 patience = 20

@@ -106,6 +106,7 @@ def _logsig_suffix(args) -> str:
 _lsig_suffix = _logsig_suffix(args)
 _il_suffix = '' if getattr(args, 'interaction_type', 'attention') == 'attention' \
              else f'_il{args.interaction_type.replace("_", "")}'
+_cv_suffix = '_cv' if getattr(args, 'cross_view_logsig', False) else ''
 
 # Resolve pretrained model source dataset (defaults to the finetune dataset)
 if args.pretrain_data_name is None:
@@ -190,7 +191,7 @@ _ft_msp_list = [float(p) for p in _ft_msp.split(',')] if _ft_msp else None
 args.num_feature_v2 = get_view_num_features(args.view2, args.num_feature, args.logsig_depth, _gt, _ft_msp_list)
 args.num_feature_v3 = get_view_num_features(args.view3, args.num_feature, args.logsig_depth, _gt, _ft_msp_list)
 
-pretrain_tag = f'{args.pretrain_data_name}_v2{args.view2}_v3{args.view3}_ep{args.epochs_pretrain}_{args.seed}{_enc_suffix}{_lsig_suffix}{_il_suffix}'
+pretrain_tag = f'{args.pretrain_data_name}_v2{args.view2}_v3{args.view3}_ep{args.epochs_pretrain}_{args.seed}{_enc_suffix}{_lsig_suffix}{_il_suffix}{_cv_suffix}'
 best_model_path = f'model_pretrain/{args.pretrain_data_name}/{pretrain_tag}.pth'
 
 ##

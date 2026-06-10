@@ -20,7 +20,7 @@ def get_features(args, encoder, loader, device):
             tensors = [repeat_if_batch_size_one(t.to(device)) for t in tensors]
             Xt, dX, Xf, Xt_aug, dX_aug, Xf_aug, y = tensors
             
-            ht, hd, hf, zt, zd, zf = encoder(Xt, dX, Xf)
+            ht, hd, hf, zt, zd, zf, *_ = encoder(Xt, dX, Xf)
             
             if args.feature == 'latent':
                 feature_t.append(zt)
@@ -54,7 +54,7 @@ def get_clf_acc(args, encoder, clf, loader, device):
             tensors = [repeat_if_batch_size_one(t.to(device)) for t in tensors]
             Xt, dX, Xf, Xt_aug, dX_aug, Xf_aug, y = tensors
             
-            ht, hd, hf, zt, zd, zf = encoder(Xt, dX, Xf)
+            ht, hd, hf, zt, zd, zf, *_ = encoder(Xt, dX, Xf)
             if args.feature == 'latent':
                 logit = clf(zt, zd, zf)
             elif args.feature == 'hidden':
@@ -80,7 +80,7 @@ def get_clf_metrics(args, encoder, clf, loader, device):
             tensors = [Xt, dX, Xf, Xt_aug, dX_aug, Xf_aug, y]
             tensors = [repeat_if_batch_size_one(t.to(device)) for t in tensors]
             Xt, dX, Xf, Xt_aug, dX_aug, Xf_aug, y = tensors
-            ht, hd, hf, zt, zd, zf = encoder(Xt, dX, Xf)
+            ht, hd, hf, zt, zd, zf, *_ = encoder(Xt, dX, Xf)
             if args.feature == 'latent':
                 logit = clf(zt, zd, zf)
             elif args.feature == 'hidden':

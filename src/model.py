@@ -365,6 +365,15 @@ class Encoder(nn.Module):
                                            nhead=args.num_head, dropout=args.dropout, batch_first=True),
                 args.num_layers)
 
+        self._cross_view_logsig = getattr(args, 'cross_view_logsig', False)
+        if self._cross_view_logsig:
+            self.contrastive_heads = nn.ModuleList([
+                nn.Sequential(nn.Linear(args.num_embedding, args.num_hidden),
+                              nn.ReLU(),
+                              nn.Linear(args.num_hidden, args.num_hidden))
+                for _ in range(3)
+            ])
+
         # Interaction layer
         _windowed = logsig_mode in ('window', 'window_smooth')
         _strided_idx = None
@@ -412,6 +421,13 @@ class Encoder(nn.Module):
         zt = self.output_layer_t(torch.cat([ht.mean(dim=1),               ht_i.mean(dim=1)], dim=-1))
         zd = self.output_layer_d(torch.cat([_pool(hd,  self._v2_last), _pool(hd_i, self._v2_last)], dim=-1))
         zf = self.output_layer_f(torch.cat([_pool(hf,  self._v3_last), _pool(hf_i, self._v3_last)], dim=-1))
+
+        if self._cross_view_logsig:
+            # Clean projections from pre-interaction pooled states — no post-interaction leakage
+            zt_clean = self.contrastive_heads[0](ht.mean(dim=1))
+            zd_clean = self.contrastive_heads[1](_pool(hd, self._v2_last))
+            zf_clean = self.contrastive_heads[2](_pool(hf, self._v3_last))
+            return ht, hd, hf, zt, zd, zf, zt_clean, zd_clean, zf_clean
 
         return ht, hd, hf, zt, zd, zf
 

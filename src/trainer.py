@@ -80,21 +80,33 @@ def train(args, encoder, clf, encoder_optimizer, clf_optimizer, loader, mode='pr
         if mode != 'pretrain':
             clf_optimizer.zero_grad()
         
+        _cross_view_logsig = getattr(args, 'cross_view_logsig', False)
         with autocast("cuda", enabled=True):
-            ht, hd, hf, zt, zd, zf = encoder(xt, dx, xf)
-            ht_aug, hd_aug, hf_aug, zt_aug, zd_aug, zf_aug = encoder(xt_aug, dx_aug, xf_aug)
-            
+            enc_out     = encoder(xt, dx, xf)
+            enc_out_aug = encoder(xt_aug, dx_aug, xf_aug)
+            if _cross_view_logsig:
+                ht, hd, hf, zt, zd, zf, zt_clean, zd_clean, zf_clean = enc_out
+                ht_aug, hd_aug, hf_aug, zt_aug, zd_aug, zf_aug, _, _, _ = enc_out_aug
+            else:
+                ht, hd, hf, zt, zd, zf = enc_out
+                ht_aug, hd_aug, hf_aug, zt_aug, zd_aug, zf_aug = enc_out_aug
+
             loss_t = info_criterion(zt, zt_aug)
             loss_d = info_criterion(zd, zd_aug)
-            loss_f = info_criterion(zf, zf_aug)
-            
-            loss = get_loss_by_type(args.loss_type, loss_t, loss_d, loss_f) + add_weight_regularization(encoder)
+
+            if _cross_view_logsig:
+                loss_cross = info_criterion(zt_clean, zf_clean) + info_criterion(zd_clean, zf_clean)
+                loss = loss_t + loss_d + args.lam_cross * loss_cross + add_weight_regularization(encoder)
+                loss_f = loss_cross  # for pbar display only
+            else:
+                loss_f = info_criterion(zf, zf_aug)
+                loss = get_loss_by_type(args.loss_type, loss_t, loss_d, loss_f) + add_weight_regularization(encoder)
 
             for name, param in encoder.named_parameters():
                 if param.grad is not None:
                     if torch.isnan(param.grad).any() or torch.isinf(param.grad).any():
                         print(f"encoder: NaN or Inf in gradients of {name}")
-            
+
             if mode != 'pretrain':
                 logit = clf(zt, zd, zf) if args.feature == 'latent' else clf(ht, hd, hf)
                 loss_c = criterion(logit, y.long())
@@ -106,7 +118,7 @@ def train(args, encoder, clf, encoder_optimizer, clf_optimizer, loader, mode='pr
                             print(f"clf: NaN or Inf in gradients of {name}")
 
         scaler.scale(loss).backward()
-        
+
         # # Gradient clipping
         # torch.nn.utils.clip_grad_norm_(encoder.parameters(), max_norm=10.0)
         # if mode != 'pretrain':
@@ -116,19 +128,22 @@ def train(args, encoder, clf, encoder_optimizer, clf_optimizer, loader, mode='pr
             scaler.step(encoder_optimizer)
         if mode != 'pretrain':
             scaler.step(clf_optimizer)
-        
+
         scaler.update()
-        
+
         total_loss += loss.item() * xt.size(0)
         if mode != 'pretrain':
             total_loss_c += loss_c.item() * xt.size(0)
         total_samples += xt.size(0)
-        
+
         ht_n = ht.norm(dim=-1).mean().item()
         hd_n = hd.norm(dim=-1).mean().item()
         hf_n = hf.norm(dim=-1).mean().item()
-        pbar.set_postfix({'loss': loss.item(), 'loss_t': loss_t.item(), 'loss_d': loss_d.item(), 'loss_f': loss_f.item(),
-                          'ht_n': ht_n, 'hd_n': hd_n, 'hf_n': hf_n})
+        postfix = {'loss': loss.item(), 'loss_t': loss_t.item(), 'loss_d': loss_d.item(), 'loss_f': loss_f.item(),
+                   'ht_n': ht_n, 'hd_n': hd_n, 'hf_n': hf_n}
+        if _cross_view_logsig:
+            postfix['loss_cross'] = loss_cross.item()
+        pbar.set_postfix(postfix)
         if _batch_idx % 100 == 0:
             print(f"  [batch {_batch_idx:4d}] ht_n={ht_n:.3f}  hd_n={hd_n:.3f}  hf_n={hf_n:.3f}", flush=True)
         _batch_idx += 1
@@ -154,33 +169,48 @@ def test(args, encoder, clf, loader, mode='pretrain', device='cuda'):
     total_loss_c = 0
     total_samples = 0
     
+    _cross_view_logsig = getattr(args, 'cross_view_logsig', False)
     with torch.no_grad():
         pbar = tqdm(loader, desc=f"Testing ({mode})", disable=_tqdm_disabled(), dynamic_ncols=True)
-        for batch in pbar:      
+        for batch in pbar:
             xt, dx, xf, xt_aug, dx_aug, xf_aug, y = [t.float().to(device) for t in batch]
 
             with autocast("cuda", enabled=True):
-                ht, hd, hf, zt, zd, zf = encoder(xt, dx, xf)
-                ht_aug, hd_aug, hf_aug, zt_aug, zd_aug, zf_aug = encoder(xt_aug, dx_aug, xf_aug)
-                
+                enc_out     = encoder(xt, dx, xf)
+                enc_out_aug = encoder(xt_aug, dx_aug, xf_aug)
+                if _cross_view_logsig:
+                    ht, hd, hf, zt, zd, zf, zt_clean, zd_clean, zf_clean = enc_out
+                    ht_aug, hd_aug, hf_aug, zt_aug, zd_aug, zf_aug, _, _, _ = enc_out_aug
+                else:
+                    ht, hd, hf, zt, zd, zf = enc_out
+                    ht_aug, hd_aug, hf_aug, zt_aug, zd_aug, zf_aug = enc_out_aug
+
                 loss_t = info_criterion(zt, zt_aug)
                 loss_d = info_criterion(zd, zd_aug)
-                loss_f = info_criterion(zf, zf_aug)
-                
-                loss = get_loss_by_type(args.loss_type, loss_t, loss_d, loss_f) + add_weight_regularization(encoder)
-                
+
+                if _cross_view_logsig:
+                    loss_cross = info_criterion(zt_clean, zf_clean) + info_criterion(zd_clean, zf_clean)
+                    loss = loss_t + loss_d + args.lam_cross * loss_cross + add_weight_regularization(encoder)
+                    loss_f = loss_cross  # for pbar display only
+                else:
+                    loss_f = info_criterion(zf, zf_aug)
+                    loss = get_loss_by_type(args.loss_type, loss_t, loss_d, loss_f) + add_weight_regularization(encoder)
+
                 if mode != 'pretrain':
                     logit = clf(zt, zd, zf) if args.feature == 'latent' else clf(ht, hd, hf)
                     loss_c = criterion(logit, y.long())
                     loss = args.lam * loss + loss_c + add_weight_regularization(clf)
-            
+
             total_loss += loss.item() * xt.size(0)
             if mode != 'pretrain':
                 total_loss_c += loss_c.item() * xt.size(0)
             total_samples += xt.size(0)
-            
-            pbar.set_postfix({'loss': loss.item(), 'loss_t': loss_t.item(), 'loss_d': loss_d.item(), 'loss_f': loss_f.item(),
-                              'ht_n': ht.norm(dim=-1).mean().item(), 'hd_n': hd.norm(dim=-1).mean().item(), 'hf_n': hf.norm(dim=-1).mean().item()})
+
+            postfix = {'loss': loss.item(), 'loss_t': loss_t.item(), 'loss_d': loss_d.item(), 'loss_f': loss_f.item(),
+                       'ht_n': ht.norm(dim=-1).mean().item(), 'hd_n': hd.norm(dim=-1).mean().item(), 'hf_n': hf.norm(dim=-1).mean().item()}
+            if _cross_view_logsig:
+                postfix['loss_cross'] = loss_cross.item()
+            pbar.set_postfix(postfix)
     
     avg_loss = total_loss / total_samples
     avg_loss_c = total_loss_c / total_samples
