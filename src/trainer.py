@@ -256,6 +256,13 @@ def load_encoder(encoder, checkpoint_path, new_num_features=None):
     for key in keys_to_remove:
         state_dict.pop(key)
     
+    # Drop any keys whose shape doesn't match the current model (e.g. mlp_logsig
+    # input_layer_d.net.0.weight when channel count differs across datasets).
+    # Those layers will keep their freshly-initialised random weights.
+    model_sd = encoder.state_dict()
+    state_dict = {k: v for k, v in state_dict.items()
+                  if k not in model_sd or model_sd[k].shape == v.shape}
+
     # Load the modified state_dict into the encoder
     encoder.load_state_dict(state_dict, strict=False)
     

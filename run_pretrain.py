@@ -115,8 +115,8 @@ if os.path.exists(output_file):
 resume_ckpt_path = f'out_pretrain/.resume_{args.data_name}_v2{args.view2}_v3{args.view3}_ep{args.epochs_pretrain}_{args.seed}{_enc_suffix}{_lsig_suffix}{_il_suffix}.pth'
     
 #
-args.context_len = int(args.data_name.split('_')[3])
-args.horizon_len = int(args.data_name.split('_')[4])
+args.context_len = int(args.data_name.split('_')[-2])
+args.horizon_len = int(args.data_name.split('_')[-1])
 
 ## Load data
 print(f"Loading data: preprocessed_data/{args.data_name}.pkl", flush=True)
@@ -221,11 +221,15 @@ if torch.cuda.device_count() > 1:
 else:
     encoder = Encoder(args).to(device)
     if hasattr(torch, 'compile'):
-        try:
-            encoder = torch.compile(encoder)
-            print('torch.compile applied to encoder', flush=True)
-        except Exception as e:
-            print(f'torch.compile skipped: {e}', flush=True)
+        _cc = torch.cuda.get_device_capability(device)
+        if _cc[0] >= 8:
+            try:
+                encoder = torch.compile(encoder)
+                print('torch.compile applied to encoder', flush=True)
+            except Exception as e:
+                print(f'torch.compile skipped: {e}', flush=True)
+        else:
+            print(f'torch.compile skipped: compute {_cc[0]}.{_cc[1]} < 8.0 (Triton SDPA instability)', flush=True)
 if getattr(args, 'random_attn_init', False):
     for m in encoder.modules():
         if isinstance(m, torch.nn.MultiheadAttention):

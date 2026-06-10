@@ -107,8 +107,8 @@ if args.pretrain_data_name is None:
 
 views = ('xt', args.view2)
 
-args.context_len = int(args.data_name.split('_')[3])
-args.horizon_len = int(args.data_name.split('_')[4])
+args.context_len = int(args.data_name.split('_')[-2])
+args.horizon_len = int(args.data_name.split('_')[-1])
 
 # Feature dims
 _pca_k = getattr(args, 'pca_components', None)

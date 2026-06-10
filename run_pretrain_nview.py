@@ -114,8 +114,8 @@ print(
     flush=True,
 )
 
-args.context_len = int(args.data_name.split('_')[3])
-args.horizon_len = int(args.data_name.split('_')[4])
+args.context_len = int(args.data_name.split('_')[-2])
+args.horizon_len = int(args.data_name.split('_')[-1])
 
 _data_tag = f'{args.data_name}-full' if getattr(args, 'full_training', False) else args.data_name
 output_file = (f'out_pretrain/{args.data_name}/'
@@ -210,11 +210,15 @@ best_model_path = (f'model_pretrain/{args.data_name}/'
 in_dims = [args.num_feature, args.num_feature_v2]
 encoder = EncoderNView(args, views=list(views), in_dims=in_dims).to(device)
 if hasattr(torch, 'compile'):
-    try:
-        encoder = torch.compile(encoder)
-        print('torch.compile applied to encoder', flush=True)
-    except Exception as e:
-        print(f'torch.compile skipped: {e}', flush=True)
+    _cc = torch.cuda.get_device_capability(device)
+    if _cc[0] >= 8:
+        try:
+            encoder = torch.compile(encoder)
+            print('torch.compile applied to encoder', flush=True)
+        except Exception as e:
+            print(f'torch.compile skipped: {e}', flush=True)
+    else:
+        print(f'torch.compile skipped: compute {_cc[0]}.{_cc[1]} < 8.0 (Triton SDPA instability)', flush=True)
 encoder_optimizer = torch.optim.Adam(encoder.parameters(), lr=args.lr,
                                      weight_decay=args.weight_decay)
 scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(

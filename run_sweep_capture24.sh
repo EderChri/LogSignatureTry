@@ -58,10 +58,10 @@ PARALLEL="${PARALLEL:-false}"
 MAX_PARALLEL="${MAX_PARALLEL:-1}"
 DEFAULT_BATCH=256
 LOGSIG_BATCH=128
-DISABLE_TQDM=0
+DISABLE_TQDM=1
 
-SKIP_STAGES="${SKIP_STAGES:-}"
-SKIP_SECTIONS="${SKIP_SECTIONS:-3view pool_ablation stride bilinear long_pretrain multi_smooth depth smooth_param}"
+SKIP_STAGES="${SKIP_STAGES-}"
+SKIP_SECTIONS="${SKIP_SECTIONS-3view pool_ablation stride bilinear long_pretrain multi_smooth depth smooth_param}"
 
 # ---------------------------------------------------------------------------
 source datasets.cfg

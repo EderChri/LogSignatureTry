@@ -117,8 +117,8 @@ if str(args.loss_type) not in ['ALL', 'TDF'] and float(args.lam) == 0.0:
     sys.exit(1)
 
 #
-args.context_len = int(args.data_name.split('_')[3])
-args.horizon_len = int(args.data_name.split('_')[4])
+args.context_len = int(args.data_name.split('_')[-2])
+args.horizon_len = int(args.data_name.split('_')[-1])
 
 #
 if str(args.loss_type) not in ['ALL', 'TDF'] and args.horizon_len not in [0, 16]:
