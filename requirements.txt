@@ -1,0 +1,10 @@
+numpy==2.1.0
+pandas==2.2.3
+tqdm==4.65.0
+matplotlib==3.10.0
+scipy==1.15.0
+scikit-learn==1.5.2
+statsmodels==0.14.6
+sympy==1.14.0
+trampoline==0.1.2
+dill==0.3.9

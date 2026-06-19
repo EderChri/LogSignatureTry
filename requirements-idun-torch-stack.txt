@@ -1,0 +1,5 @@
+torchdiffeq==0.2.5
+torchsde==0.2.6
+torchcde==0.2.5
+log-signatures-pytorch==0.1.11
+pytorch-metric-learning==2.9.0
