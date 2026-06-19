@@ -15,6 +15,39 @@ conda activate mvcl
 pip install torch torchcde log-signatures-pytorch pytorch-metric-learning scikit-learn numpy pandas tqdm matplotlib
 ```
 
+### HPC / IDUN recommended environment
+
+Use the IDUN Python module and an isolated venv:
+
+```bash
+module purge
+module load Python/3.13.1-GCCcore-14.2.0
+export PYTHONNOUSERSITE=1
+python -m venv ~/PyEnvMvcl-py313
+source ~/PyEnvMvcl-py313/bin/activate
+python -m ensurepip --upgrade
+python -m pip install --upgrade pip wheel
+python -m pip install --upgrade -r requirements.txt
+python -m pip install --upgrade -r requirements-idun-torch.txt
+python -m pip install --upgrade --no-deps --ignore-requires-python -r requirements-idun-torch-stack.txt
+```
+
+The SLURM scripts run the same setup automatically and delegate work to shell scripts:
+
+```bash
+sbatch preprocess.slurm
+sbatch train_harth_har70plus.slurm
+```
+
+`train_harth_har70plus.slurm` defaults to a smoke test: one pretrain epoch,
+one finetune/probe epoch, and small batches. Override the environment variables
+for a longer run:
+
+```bash
+EPOCHS_PRETRAIN=20 EPOCHS_FINETUNE=50 BATCH_PRETRAIN=256 BATCH_FINETUNE=16 \
+  sbatch train_harth_har70plus.slurm
+```
+
 ---
 
 ## Data Preprocessing
