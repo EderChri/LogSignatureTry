@@ -130,6 +130,7 @@ celerybeat.pid
 # Environments
 .env
 .venv
+.venv*/*
 env/
 venv/
 ENV/
@@ -184,7 +185,8 @@ Epilepsy
 harth
 har70plus
 SleepEEg
-logs
+logs/*
+!logs/.gitkeep
 *.pdf
 *.png
 *.pkl
