@@ -1,4 +1,5 @@
 #!/bin/bash
+cd "$(dirname "$0")/.." || exit 1
 # =============================================================================
 # End-to-end pipeline: pretrain → finetune → probe → aggregate for all pairs.
 #
@@ -49,16 +50,16 @@ REQUESTED="${1:-all}"
 
 log_msg "Pipeline started (pair: ${REQUESTED})"
 
-log_msg "Running sweep: bash run_sweep.sh ${REQUESTED}"
-bash run_sweep.sh "${REQUESTED}" 2>&1 | tee -a "$PIPELINE_LOG"
+log_msg "Running sweep: bash scripts/run_sweep.sh ${REQUESTED}"
+bash scripts/run_sweep.sh "${REQUESTED}" 2>&1 | tee -a "$PIPELINE_LOG"
 if [ "${PIPESTATUS[0]}" -ne 0 ]; then
   log_msg "Sweep failed; aborting."
   exit 1
 fi
 
 # Aggregate multi-seed results
-log_msg "Aggregating multi-seed results: python aggregate_results.py"
-python aggregate_results.py 2>&1 | tee -a "$PIPELINE_LOG"
+log_msg "Aggregating multi-seed results: python scripts/aggregate_results.py"
+python scripts/aggregate_results.py 2>&1 | tee -a "$PIPELINE_LOG"
 
 # Collect summaries from all datasets discovered in output folders.
 for pretrain_summary in out_pretrain/*/final_pretrain_summary.tsv; do

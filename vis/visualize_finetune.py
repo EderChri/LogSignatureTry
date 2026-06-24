@@ -10,6 +10,7 @@ dx+xf is the reference config (no logsig window); its mlp_logsig cell is blank.
 Usage: python visualize_finetune.py
 """
 
+import os
 import re
 import numpy as np
 import matplotlib.pyplot as plt
@@ -228,7 +229,8 @@ fig.subplots_adjust(left=0.18, right=0.72, top=0.92, bottom=0.06)
 plot_heatmap(epilepsy_scores,
              'Epilepsy (SleepEEG pretrain)\nFinetune accuracy', ax)
 
-plt.savefig('finetune_heatmap.pdf', bbox_inches='tight')
-plt.savefig('finetune_heatmap.png', dpi=150, bbox_inches='tight')
-print('Saved: finetune_heatmap.pdf  finetune_heatmap.png')
+os.makedirs('plots', exist_ok=True)
+plt.savefig('plots/finetune_heatmap.pdf', bbox_inches='tight')
+plt.savefig('plots/finetune_heatmap.png', dpi=150, bbox_inches='tight')
+print('Saved: plots/finetune_heatmap.pdf  plots/finetune_heatmap.png')
 plt.show()

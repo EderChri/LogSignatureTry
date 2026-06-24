@@ -48,7 +48,7 @@ from torch.utils.data import DataLoader
 use_cuda = torch.cuda.is_available()
 device = torch.device('cuda' if use_cuda else 'cpu')
 
-PLOT_DIR = 'attention_plots'
+PLOT_DIR = 'plots/attention_plots'
 os.makedirs(PLOT_DIR, exist_ok=True)
 
 # ---------------------------------------------------------------------------

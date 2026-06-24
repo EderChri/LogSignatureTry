@@ -1,4 +1,5 @@
 #!/bin/bash
+cd "$(dirname "$0")/.." || exit 1
 # Run xt+dx+xf transformer attention (mean-pool) baseline for all seeds and targets.
 # This fills the missing non-bilinear baseline that run_sweep_capture24.sh skipped.
 set -uo pipefail
@@ -29,7 +30,7 @@ for SEED in "${SEEDS[@]}"; do
     echo "[pretrain seed=$SEED GPU=$GPU]"
     CUDA_VISIBLE_DEVICES=$GPU PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
     TQDM_DISABLE=1 \
-    python -u run_pretrain.py \
+    python -u scripts/run_pretrain.py \
       --data_name _DA_capture24_256_00 \
       --num_feature 3 --num_target 1 \
       --view2 dx --view3 xf \
@@ -62,7 +63,7 @@ for SEED in "${SEEDS[@]}"; do
     echo "[finetune $FT_DATA seed=$SEED GPU=$GPU]"
     CUDA_VISIBLE_DEVICES=$GPU PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
     TQDM_DISABLE=1 \
-    python run_finetune.py \
+    python scripts/run_finetune.py \
       --data_name "$FT_DATA" \
       --pretrain_data_name _DA_capture24_256_00 \
       --num_feature $FT_FEAT --num_target $FT_CLS \

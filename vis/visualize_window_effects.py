@@ -12,6 +12,7 @@ Smaller windows → more oscillation per feature; larger windows → cancellatio
 Usage: python visualize_window_effects.py
 """
 
+import os
 import pickle
 import numpy as np
 import matplotlib.pyplot as plt
@@ -122,7 +123,8 @@ for row in [1, 2]:
         axes[row, col].set_ylim(-vmax, vmax)
 
 plt.tight_layout()
-plt.savefig('window_effects.pdf', bbox_inches='tight')
-plt.savefig('window_effects.png', dpi=150, bbox_inches='tight')
-print('Saved: window_effects.pdf  window_effects.png')
+os.makedirs('plots', exist_ok=True)
+plt.savefig('plots/window_effects.pdf', bbox_inches='tight')
+plt.savefig('plots/window_effects.png', dpi=150, bbox_inches='tight')
+print('Saved: plots/window_effects.pdf  plots/window_effects.png')
 plt.show()

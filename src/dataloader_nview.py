@@ -58,7 +58,8 @@ class Load_DatasetNView(Dataset):
          y)
     """
     def __init__(self, views_data: list, views_aug_data: list, y: torch.Tensor,
-                 mode: str, views: list, num_repeats: int = 1):
+                 mode: str, views: list, num_repeats: int = 1,
+                 aug_fns: list = None):
         super().__init__()
         assert len(views_data) == len(views_aug_data) == len(views), (
             "views_data, views_aug_data, and views must all have the same length"
@@ -67,7 +68,7 @@ class Load_DatasetNView(Dataset):
         self.mode      = mode
         self.views     = list(views)
         self.num_views = len(views)
-        self.aug_fns   = [_aug_fn_for_view(v) for v in views]
+        self.aug_fns   = aug_fns if aug_fns is not None else [_aug_fn_for_view(v) for v in views]
 
         if mode == 'pretrain':
             self.data     = [self._repeat(x, num_repeats) for x in views_data]

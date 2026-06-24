@@ -433,7 +433,8 @@ def run_dataset(name: str, subject_file: str | None = None,
     print(f'[{name}] Running ADF + KPSS tests on {len(X_st)} windows …')
     adf_frac, kpss_frac = stationarity_summary(X_st, y_st, label_names)
 
-    out_pdf = f'explore_{name}.pdf'
+    os.makedirs('plots', exist_ok=True)
+    out_pdf = f'plots/explore_{name}.pdf'
     print(f'[{name}] Writing {out_pdf} …')
 
     with PdfPages(out_pdf) as pdf:

@@ -394,7 +394,8 @@ def run_dataset(name: str, max_windows_for_stat: int = 300):
     print(f'[{name}] Running ADF + KPSS on {len(X_st)} windows …')
     adf_frac, kpss_frac = stationarity_summary(X_st, y_st, label_names)
 
-    out_pdf = f'explore_{name}.pdf'
+    os.makedirs('plots', exist_ok=True)
+    out_pdf = f'plots/explore_{name}.pdf'
     print(f'[{name}] Writing {out_pdf} …')
 
     with PdfPages(out_pdf) as pdf:

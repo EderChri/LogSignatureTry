@@ -26,7 +26,7 @@ from torch import nn
 from torch.utils.data import DataLoader
 
 from src.config import parse_args
-from src.dataloader import preprocess_data, get_view_num_features
+from src.dataloader import preprocess_data, get_view_num_features, _aug_fn_for_view, _make_logsig_noise_aug
 from src.dataloader_nview import Load_DatasetNView
 from src.model_nview import EncoderNView, ClassifierNView
 from src.trainer_nview import train_nview, test_nview
@@ -95,6 +95,14 @@ def _logsig_suffix(args) -> str:
         base += f'_p{pool}'
     if depth != 2:
         base += f'_d{depth}'
+    lsn = getattr(args, 'logsig_noise_scale', 0.0)
+    if lsn > 0.0:
+        base += f'_lsn{lsn}'
+    if getattr(args, 'logsig_normalize', False):
+        base += '_norm'
+    lag = getattr(args, 'logsig_lag', 0)
+    if lag > 0:
+        base += f'_lag{lag}'
     return base
 
 
@@ -154,6 +162,7 @@ _logsig_kw = dict(
     logsig_stride=getattr(args, 'logsig_stride', 1),
     logsig_global_time=_gt,
     logsig_multi_smooth_params=[float(p) for p in _ft_msp.split(',')] if _ft_msp else None,
+    logsig_normalize=getattr(args, 'logsig_normalize', False),
     pca_components=_pca_k,
 )
 
@@ -165,8 +174,23 @@ Xtr2, Xva2 = pre_tv['v2'][0], pre_tv['v2'][1]
 Xtr1, Xte1 = pre_tt['v1'][0], pre_tt['v1'][1]
 Xtr2, Xte2 = pre_tt['v2'][0], pre_tt['v2'][1]
 
+_logsig_noise_scale = getattr(args, 'logsig_noise_scale', 0.0)
+_aug_fns = None
+if _logsig_noise_scale > 0.0 and 'logsig' in views and not getattr(args, 'cross_view_logsig', False):
+    _ft_mode = getattr(args, 'logsig_mode', 'stream')
+    _multi_aug = _ft_msp is not None and _ft_mode == 'window_smooth'
+    _num_copies = len([p.strip() for p in _ft_msp.split(',')]) if _multi_aug else 1
+    _logsig_view_idx = next(i for i, v in enumerate(views) if v == 'logsig')
+    _logsig_train_data = [Xtr1, Xtr2][_logsig_view_idx]
+    _logsig_aug = _make_logsig_noise_aug(
+        _logsig_noise_scale, _logsig_train_data,
+        args.logsig_depth, args.num_feature + 1,
+        has_global_time=_gt, num_copies=_num_copies,
+    )
+    _aug_fns = [_logsig_aug if v == 'logsig' else _aug_fn_for_view(v) for v in views]
+
 def make_loader(v1, v2, y, mode):
-    ds = Load_DatasetNView([v1, v2], [v1, v2], y, mode, views=list(views))
+    ds = Load_DatasetNView([v1, v2], [v1, v2], y, mode, views=list(views), aug_fns=_aug_fns)
     return DataLoader(ds, batch_size=args.batch_size_finetune, shuffle=(mode == 'finetune'),
                       drop_last=False, num_workers=4, pin_memory=True, persistent_workers=True)
 

@@ -116,6 +116,24 @@ def get_args_parser():
                              'each as a separate view. Adds a cross-level NTXentLoss between the '
                              'two level projections. Only effective with --view2 logsig in the '
                              'nview scripts. Requires --logsig_depth >= 2.')
+    logsig.add_argument('--logsig_noise_scale', default=0.0, type=float,
+                        help='Add per-level Gaussian noise to log-signature views as augmentation. '
+                             'Noise std for depth-k features = noise_scale * std_k, where std_k '
+                             'is the std of that level computed over the training set. '
+                             'E.g. 0.1 adds noise at 10%% of each level\'s training std, '
+                             'automatically tracking the order of magnitude of each level. '
+                             '0.0 = disabled (default). Ignored when --cross_view_logsig is set.')
+    logsig.add_argument('--logsig_normalize', action='store_true',
+                        help='Normalize log-signature features per truncation level (z-score with '
+                             'one shared mean/std per level, computed over all samples and timesteps). '
+                             'Disabled by default for legacy compatibility.')
+    logsig.add_argument('--logsig_lag', default=0, type=int,
+                        help='Temporal lag (in timesteps) for the logsig contrastive positive. '
+                             'When > 0 and logsig_mode is window/window_smooth, the positive pair '
+                             'for the logsig view is the signature of the window l steps earlier: '
+                             'logsig_lag[t] = logsig[t-l], zero-padded for t < l. '
+                             'Replaces the identity/noise augmentation for the logsig view. '
+                             'Only meaningful in window/window_smooth mode. 0 = disabled (default).')
 
     # Dimensionality reduction
     parser.add_argument('--pca_components', default=None, type=int,

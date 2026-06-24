@@ -29,7 +29,7 @@ from torch import nn
 from torch.utils.data import DataLoader
 
 from src.config import parse_args
-from src.dataloader import preprocess_data, get_view_num_features
+from src.dataloader import preprocess_data, get_view_num_features, _aug_fn_for_view, _make_logsig_noise_aug
 from src.dataloader_nview import Load_DatasetNView
 from src.model_nview import EncoderNView
 from src.trainer_nview import train_nview, test_nview
@@ -97,6 +97,14 @@ def _logsig_suffix(args) -> str:
         base += f'_p{pool}'
     if depth != 2:
         base += f'_d{depth}'
+    lsn = getattr(args, 'logsig_noise_scale', 0.0)
+    if lsn > 0.0:
+        base += f'_lsn{lsn}'
+    if getattr(args, 'logsig_normalize', False):
+        base += '_norm'
+    lag = getattr(args, 'logsig_lag', 0)
+    if lag > 0:
+        base += f'_lag{lag}'
     return base
 
 
@@ -165,12 +173,14 @@ _ls_wsiz   = getattr(args, 'logsig_window_size', 32)
 _ls_smooth = getattr(args, 'logsig_smoothing', 'tukey')
 _ls_sp     = getattr(args, 'logsig_smooth_param', 0.5)
 _ls_stride = getattr(args, 'logsig_stride', 1)
+_ls_norm   = getattr(args, 'logsig_normalize', False)
 _ls_msp    = getattr(args, 'logsig_multi_smooth_params', None)
 _msp_key   = ('_msp' + _ls_msp.replace(',', '-')) if _ls_msp else ''
 _pca_key   = f'_pca{_pca_k}' if _pca_k else ''
+_norm_key  = '_norm' if _ls_norm else ''
 _logsig_cache_key = (
     f'{args.data_name}_d{args.logsig_depth}_{_ls_mode}'
-    f'_w{_ls_wsiz}_s{_ls_stride}_{_ls_smooth}_sp{_ls_sp}_gt{int(_gt)}{_msp_key}{_pca_key}'
+    f'_w{_ls_wsiz}_s{_ls_stride}_{_ls_smooth}_sp{_ls_sp}_gt{int(_gt)}{_msp_key}{_pca_key}{_norm_key}'
 )
 preprocessed = preprocess_data(
     X_train_intp, X_train_intp, views=views,
@@ -179,6 +189,7 @@ preprocessed = preprocess_data(
     logsig_smoothing=_ls_smooth, logsig_smooth_param=_ls_sp,
     logsig_stride=_ls_stride, logsig_global_time=_gt,
     logsig_multi_smooth_params=[float(p) for p in _ls_msp.split(',')] if _ls_msp else None,
+    logsig_normalize=_ls_norm,
     logsig_cache_key=_logsig_cache_key,
     pca_components=_pca_k,
 )
@@ -187,11 +198,33 @@ v2_tr = preprocessed['v2'][0]
 print(f'Preprocessing done in {(time.time()-preprocess_start)/60:.2f} min', flush=True)
 
 X_train     = [v1_tr, v2_tr]
-X_train_aug = X_train
+X_train_aug = list(X_train)
+
+_ls_lag = getattr(args, 'logsig_lag', 0)
+if _ls_lag > 0 and 'logsig' in views:
+    _logsig_view_idx = next(i for i, v in enumerate(views) if v == 'logsig')
+    _logsig_data = X_train[_logsig_view_idx]          # [N, L, C]
+    _logsig_lag = torch.zeros_like(_logsig_data)
+    _logsig_lag[:, _ls_lag:, :] = _logsig_data[:, :-_ls_lag, :]
+    X_train_aug[_logsig_view_idx] = _logsig_lag
+    print(f'[logsig_lag={_ls_lag}] Using time-lagged logsig as positive augmentation for view {_logsig_view_idx + 1}', flush=True)
 
 # Datasets and loaders
-pretrain_dataset = Load_DatasetNView(X_train, X_train_aug, y_train, 'pretrain', views=list(views))
-prevalid_dataset = Load_DatasetNView(X_train, X_train_aug, y_train, 'pretrain', views=list(views))
+_logsig_noise_scale = getattr(args, 'logsig_noise_scale', 0.0)
+_aug_fns = None
+if _logsig_noise_scale > 0.0 and 'logsig' in views and not getattr(args, 'cross_view_logsig', False):
+    _multi_aug = _ls_msp is not None and _ls_mode == 'window_smooth'
+    _num_copies = len([p.strip() for p in _ls_msp.split(',')]) if _multi_aug else 1
+    _logsig_view_idx = next(i for i, v in enumerate(views) if v == 'logsig')
+    _logsig_aug = _make_logsig_noise_aug(
+        _logsig_noise_scale, X_train[_logsig_view_idx],
+        args.logsig_depth, args.num_feature + 1,
+        has_global_time=_gt, num_copies=_num_copies,
+    )
+    _aug_fns = [_logsig_aug if v == 'logsig' else _aug_fn_for_view(v) for v in views]
+
+pretrain_dataset = Load_DatasetNView(X_train, X_train_aug, y_train, 'pretrain', views=list(views), aug_fns=_aug_fns)
+prevalid_dataset = Load_DatasetNView(X_train, X_train_aug, y_train, 'pretrain', views=list(views), aug_fns=_aug_fns)
 pretrain_loader = DataLoader(pretrain_dataset, batch_size=args.batch_size_pretrain,
                              shuffle=True,  drop_last=False,
                              num_workers=4, pin_memory=True, persistent_workers=True)

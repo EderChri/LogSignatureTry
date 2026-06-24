@@ -1,4 +1,5 @@
 #!/bin/bash
+cd "$(dirname "$0")/.." || exit 1
 
 set -euo pipefail
 
@@ -46,14 +47,14 @@ echo "Starting minimal HARTH -> HAR70plus pipeline"
 echo "seed=$SEED pretrain_epochs=$EPOCHS_PRETRAIN finetune_epochs=$EPOCHS_FINETUNE"
 echo "views=xt,$VIEW2,$VIEW3 encoder=$ENCODER_TYPE"
 
-python -u run_pretrain.py \
+python -u scripts/run_pretrain.py \
   --data_name _DA_HARTH_256_00 \
   --num_feature 6 \
   --num_target 12 \
   --batch_size_pretrain "$BATCH_PRETRAIN" \
   "${COMMON_ARGS[@]}"
 
-python -u run_finetune.py \
+python -u scripts/run_finetune.py \
   --data_name _DA_HAR70plus_256_00 \
   --pretrain_data_name _DA_HARTH_256_00 \
   --num_feature 6 \
@@ -66,7 +67,7 @@ python -u run_finetune.py \
   --run_modes finetune \
   "${COMMON_ARGS[@]}"
 
-python -u run_probe.py \
+python -u scripts/run_probe.py \
   --probe_type raw \
   --data_name _DA_HAR70plus_256_00 \
   --pretrain_data_name _DA_HARTH_256_00 \
@@ -79,7 +80,7 @@ python -u run_probe.py \
 if [ "$ENCODER_TYPE" = "transformer" ] && \
    [ "$LOGSIG_MODE" = "stream" ] && \
    [ "$LOGSIG_DEPTH" = "2" ]; then
-  python -u run_probe.py \
+  python -u scripts/run_probe.py \
     --probe_type pretrained \
     --data_name _DA_HAR70plus_256_00 \
     --pretrain_data_name _DA_HARTH_256_00 \
@@ -92,7 +93,7 @@ else
   echo "Skipping pretrained probe for non-default checkpoint naming."
 fi
 
-python -u aggregate_results.py
+python -u scripts/aggregate_results.py
 
 echo "Done."
 echo "Pretrain summary: out_pretrain/_DA_HARTH_256_00/final_pretrain_summary.tsv"

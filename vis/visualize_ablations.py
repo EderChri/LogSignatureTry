@@ -11,6 +11,7 @@ Each panel: mean ± 95% CI across 10 seeds, one line per view combination.
 Usage: python visualize_ablations.py
 """
 
+import os
 import re
 import numpy as np
 import pandas as pd
@@ -243,8 +244,9 @@ fig.suptitle('Ablation Analysis: Multi-smooth (G), Depth (H), Taper α (I)\n'
              fontsize=12, y=1.01)
 
 plt.tight_layout()
-out_png = 'ablation_analysis.png'
-out_pdf = 'ablation_analysis.pdf'
+os.makedirs('plots', exist_ok=True)
+out_png = 'plots/ablation_analysis.png'
+out_pdf = 'plots/ablation_analysis.pdf'
 plt.savefig(out_png, dpi=150, bbox_inches='tight')
 plt.savefig(out_pdf, bbox_inches='tight')
 print(f'Saved: {out_png}  {out_pdf}')

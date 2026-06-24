@@ -14,6 +14,7 @@ Reference line: dx+xf (Transformer, global) score shown as dotted line per panel
 Usage: python visualize_results.py
 """
 
+import os
 import re
 import numpy as np
 import matplotlib
@@ -35,24 +36,28 @@ VIEW_LABEL = {
     'v2logsig_nview': 'logsig\n(2-view)',
 }
 
-WINDOW_ORDER = ['global', 'win64', 'win128', 'win128_s7', 'tukey64', 'tukey128', 'tukey128_s7']
+WINDOW_ORDER = ['global', 'win64', 'norm_win64', 'norm_win64_lag', 'win128', 'win128_s7', 'tukey64', 'tukey128', 'tukey128_s7']
 WINDOW_LABEL = {
-    'global':      'global',
-    'win64':       'win 64',
-    'win128':      'win 128',
-    'win128_s7':   'win 128\ns7',
-    'tukey64':     'tukey 64',
-    'tukey128':    'tukey 128',
-    'tukey128_s7': 'tukey 128\ns7',
+    'global':        'global',
+    'win64':         'win 64',
+    'norm_win64':    'norm win 64',
+    'norm_win64_lag':'norm win 64\n+lag',
+    'win128':        'win 128',
+    'win128_s7':     'win 128\ns7',
+    'tukey64':       'tukey 64',
+    'tukey128':      'tukey 128',
+    'tukey128_s7':   'tukey 128\ns7',
 }
 WINDOW_COLOR = {
-    'global':      '#4C72B0',
-    'win64':       '#DD8452',
-    'win128':      '#55A868',
-    'win128_s7':   '#2CA02C',
-    'tukey64':     '#C44E52',
-    'tukey128':    '#8172B3',
-    'tukey128_s7': '#6B4C9A',
+    'global':        '#4C72B0',
+    'win64':         '#DD8452',
+    'norm_win64':    '#C8860A',
+    'norm_win64_lag':'#95190C',
+    'win128':        '#55A868',
+    'win128_s7':     '#2CA02C',
+    'tukey64':       '#C44E52',
+    'tukey128':      '#8172B3',
+    'tukey128_s7':   '#6B4C9A',
 }
 
 # Three encoder variants:
@@ -89,7 +94,7 @@ SUB_W_2 = 2 * BAR_W + INNER_GAP        # 2-bar sub-group (windowed, no bilinear)
 SUB_W_3 = 3 * BAR_W + 2 * INNER_GAP   # 3-bar sub-group (global or bilinear windowed)
 _N_WIN = len(WINDOW_ORDER)             # total number of window sub-groups
 # win64, win128, tukey128 have bilinear data → 3-bar; others → 2-bar
-_BIL_WIN_SET = {'win64', 'win128', 'tukey128'}
+_BIL_WIN_SET = {'win64', 'norm_win64', 'win128', 'tukey128'}
 LOGSIG_SPAN = (
     SUB_W_3                                                           # global
     + sum(SUB_W_3 if w in _BIL_WIN_SET else SUB_W_2
@@ -172,10 +177,13 @@ def parse_finetune_row(name: str):
     view_key = m.group(1)
 
     window = 'global'
-    for w in ('win128_s7', 'tukey128_s7', 'win64', 'win128', 'tukey64', 'tukey128'):
-        if f'_{w}_' in name or f'_{w}.' in name:
-            window = w
-            break
+    if '_win64_norm' in name:
+        window = 'norm_win64_lag' if '_lag' in name else 'norm_win64'
+    else:
+        for w in ('win128_s7', 'tukey128_s7', 'win64', 'win128', 'tukey64', 'tukey128'):
+            if f'_{w}_' in name or f'_{w}.' in name:
+                window = w
+                break
 
     return view_key, window, encoder
 
@@ -404,9 +412,9 @@ for ax, (title, scores) in zip(axes, panels):
                             elinewidth=0.6,
                             capsize=3,
                             zorder=4)
-                # 95% CI (thicker black bar on top)
+                # 95% CI (thicker black bar on top) — clipped to [0, 1]
                 ax.errorbar(xc + rel_x, score,
-                            yerr=ci95,
+                            yerr=[[min(ci95, score)], [min(ci95, 1.0 - score)]],
                             fmt='none',
                             ecolor='#111',
                             elinewidth=1.6,
@@ -466,9 +474,10 @@ leg2 = fig.legend(handles=enc_patches,
 fig.add_artist(leg1)
 
 plt.tight_layout()
-plt.savefig('finetune_results.pdf', bbox_inches='tight')
-plt.savefig('finetune_results.png', dpi=150, bbox_inches='tight')
-print('Saved: finetune_results.pdf  finetune_results.png')
+os.makedirs('plots', exist_ok=True)
+plt.savefig('plots/finetune_results.pdf', bbox_inches='tight')
+plt.savefig('plots/finetune_results.png', dpi=150, bbox_inches='tight')
+print('Saved: plots/finetune_results.pdf  plots/finetune_results.png')
 plt.show()
 
 # ---------------------------------------------------------------------------
@@ -520,8 +529,9 @@ for ax, (title, scores) in zip(axes2, il_panels):
                    linewidth=0.5,
                    zorder=3)
             if len(vals) > 1:
+                _sem = np.std(vals, ddof=1) / len(vals) ** 0.5
                 ax.errorbar(bar_x, score,
-                            yerr=np.std(vals, ddof=1) / len(vals) ** 0.5,
+                            yerr=[[min(_sem, score)], [min(_sem, 1.0 - score)]],
                             fmt='none', ecolor='#111', elinewidth=1.5,
                             capsize=3, zorder=5)
 
@@ -563,14 +573,14 @@ fig2.legend(handles=mode_patches + [ep200_handle],
             title='Mode / epoch', title_fontsize=9)
 
 plt.tight_layout()
-plt.savefig('interaction_type_results.pdf', bbox_inches='tight')
-plt.savefig('interaction_type_results.png', dpi=150, bbox_inches='tight')
-print('Saved: interaction_type_results.pdf  interaction_type_results.png')
-plt.show()
+plt.savefig('plots/interaction_type_results.pdf', bbox_inches='tight')
+plt.savefig('plots/interaction_type_results.png', dpi=150, bbox_inches='tight')
+print('Saved: plots/interaction_type_results.pdf  plots/interaction_type_results.png')
+#plt.show()
 
 # ---------------------------------------------------------------------------
-# Figure 3: Bilinear vs Standard — mlp_logsig, logsig view combos
-#
+    # Figure 3: Bilinear vs Standard — mlp_logsig, logsig view combos
+    #
 # X groups: view combo (dx+logsig | logsig+xf), each split by window variant.
 # Each x-position: 2 bars — standard (solid) vs bilinear (cross-hatch).
 # Color:  window variant  (matches Figure 1 palette).
@@ -649,7 +659,7 @@ for ax, (title, scores, ref_scores) in zip(axes3, bil_panels):
                                     fmt='none', ecolor='#aaa', elinewidth=0.6,
                                     capsize=3, zorder=4)
                         ax.errorbar(bx, score,
-                                    yerr=ci95,
+                                    yerr=[[min(ci95, score)], [min(ci95, 1.0 - score)]],
                                     fmt='none', ecolor='#111', elinewidth=1.6,
                                     capsize=2, zorder=5)
                 else:
@@ -750,7 +760,7 @@ fig3.legend(handles=[ref_ci_patch, ref_range_patch],
             title='Baseline (dx+xf)', title_fontsize=9)
 
 plt.tight_layout()
-plt.savefig('bilinear_logsig_results.pdf', bbox_inches='tight')
-plt.savefig('bilinear_logsig_results.png', dpi=150, bbox_inches='tight')
-print('Saved: bilinear_logsig_results.pdf  bilinear_logsig_results.png')
-plt.show()
+plt.savefig('plots/bilinear_logsig_results.pdf', bbox_inches='tight')
+plt.savefig('plots/bilinear_logsig_results.png', dpi=150, bbox_inches='tight')
+print('Saved: plots/bilinear_logsig_results.pdf  plots/bilinear_logsig_results.png')
+#plt.show()

@@ -1,4 +1,5 @@
 #!/bin/bash
+cd "$(dirname "$0")/.." || exit 1
 # =============================================================================
 # run_sweep_capture24.sh — pretrain on capture24, finetune on all targets
 #
@@ -228,7 +229,7 @@ for PAIR in "${RUN_PAIRS[@]}"; do
                     TAG="${PRETRAIN_DATA}_v2${V2}_v3${V3}_ep${EP}_${SEED}${ENC_SUFFIX}${LS}${IL_SFXR}"
                     _launch_if_new "out_pretrain/${PRETRAIN_DATA}/${TAG}" \
                       "$TAG" "logs/${TAG}.log" \
-                      python -u run_pretrain.py \
+                      python -u scripts/run_pretrain.py \
                         --data_name "${PRETRAIN_DATA}" \
                         --num_feature "${PRETRAIN_NUM_FEATURE}" \
                         --num_target  "${PRETRAIN_NUM_TARGET}" \
@@ -282,7 +283,7 @@ for PAIR in "${RUN_PAIRS[@]}"; do
                     fi
                     TAG="ft_${FINETUNE_DATA}_from_${PT_TAG}"
                     _launch "$TAG" "logs/${TAG}.log" \
-                      python run_finetune.py \
+                      python scripts/run_finetune.py \
                         --data_name "${FINETUNE_DATA}" \
                         --pretrain_data_name "${PRETRAIN_DATA}" \
                         --num_feature "${FINETUNE_NUM_FEATURE}" \
@@ -342,7 +343,7 @@ for PAIR in "${RUN_PAIRS[@]}"; do
                 TAG="${PRETRAIN_DATA}_v2logsig_nview_ep${EP}_${SEED}${ENC_SUFFIX}${LS}${IL_SFXR_B}"
                 _launch_if_new "out_pretrain/${PRETRAIN_DATA}/${TAG}" \
                   "$TAG" "logs/${TAG}.log" \
-                  python -u run_pretrain_nview.py \
+                  python -u scripts/run_pretrain_nview.py \
                     --data_name "${PRETRAIN_DATA}" \
                     --num_feature "${PRETRAIN_NUM_FEATURE}" \
                     --num_target  "${PRETRAIN_NUM_TARGET}" \
@@ -371,7 +372,7 @@ for PAIR in "${RUN_PAIRS[@]}"; do
                 else
                   TAG="ft2v_${FINETUNE_DATA}_from_${PT_TAG}"
                   _launch "$TAG" "logs/${TAG}.log" \
-                    python run_finetune_nview.py \
+                    python scripts/run_finetune_nview.py \
                       --data_name "${FINETUNE_DATA}" \
                       --pretrain_data_name "${PRETRAIN_DATA}" \
                       --num_feature "${FINETUNE_NUM_FEATURE}" \

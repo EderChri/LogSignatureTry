@@ -101,12 +101,20 @@ def _logsig_suffix(args) -> str:
         base += f'_p{pool}'
     if depth != 2:
         base += f'_d{depth}'
+    lsn = getattr(args, 'logsig_noise_scale', 0.0)
+    if lsn > 0.0:
+        base += f'_lsn{lsn}'
+    if getattr(args, 'logsig_normalize', False):
+        base += '_norm'
+    lag = getattr(args, 'logsig_lag', 0)
+    if lag > 0:
+        base += f'_lag{lag}'
     return base
 
 _lsig_suffix = _logsig_suffix(args)
 _il_suffix = '' if getattr(args, 'interaction_type', 'attention') == 'attention' \
              else f'_il{args.interaction_type.replace("_", "")}'
-_cv_suffix = '_cv' if getattr(args, 'cross_view_logsig', False) else ''
+_cv_suffix = f'_cv{getattr(args, "lam_cross", 1.0)}' if getattr(args, 'cross_view_logsig', False) else ''
 
 # Resolve pretrained model source dataset (defaults to the finetune dataset)
 if args.pretrain_data_name is None:
@@ -151,6 +159,7 @@ _logsig_kw = dict(
     logsig_stride=getattr(args, 'logsig_stride', 1),
     logsig_global_time=getattr(args, 'logsig_global_time', False),
     logsig_multi_smooth_params=[float(p) for p in _ft_msp.split(',')] if _ft_msp else None,
+    logsig_normalize=getattr(args, 'logsig_normalize', False),
     pca_components=_pca_k,
 )
 
@@ -168,9 +177,25 @@ X_train = [X_train_intp_v1, X_train_intp_v2, X_train_intp_v3]
 X_valid = [X_val_intp_v1, X_val_intp_v2, X_val_intp_v3]
 X_test = [X_test_intp_v1, X_test_intp_v2, X_test_intp_v3]
 
-train_dataset = Load_Dataset(X_train, X_train, y_train, 'finetune', views=views)
-valid_dataset = Load_Dataset(X_valid, X_valid, y_val, 'test', views=views)
-test_dataset = Load_Dataset(X_test, X_test, y_test, 'test', views=views)
+_logsig_noise_scale = getattr(args, 'logsig_noise_scale', 0.0)
+_aug_fns = None
+if _logsig_noise_scale > 0.0 and 'logsig' in views and not getattr(args, 'cross_view_logsig', False):
+    _eff_nf = min((_pca_k if _pca_k is not None else args.num_feature), 64)
+    _ft_mode = getattr(args, 'logsig_mode', 'stream')
+    _ft_gt   = getattr(args, 'logsig_global_time', False)
+    _multi_aug = _ft_msp is not None and _ft_mode == 'window_smooth'
+    _num_copies = len([p.strip() for p in _ft_msp.split(',')]) if _multi_aug else 1
+    _logsig_view_idx = next(i for i, v in enumerate(views) if v == 'logsig')
+    _logsig_aug = _make_logsig_noise_aug(
+        _logsig_noise_scale, X_train[_logsig_view_idx],
+        args.logsig_depth, _eff_nf + 1,
+        has_global_time=_ft_gt, num_copies=_num_copies,
+    )
+    _aug_fns = [_logsig_aug if v == 'logsig' else _aug_fn_for_view(v) for v in views]
+
+train_dataset = Load_Dataset(X_train, X_train, y_train, 'finetune', views=views, aug_fns=_aug_fns)
+valid_dataset = Load_Dataset(X_valid, X_valid, y_val, 'test', views=views, aug_fns=_aug_fns)
+test_dataset = Load_Dataset(X_test, X_test, y_test, 'test', views=views, aug_fns=_aug_fns)
 train_loader = DataLoader(train_dataset, batch_size=args.batch_size_finetune, shuffle=True, drop_last=False, num_workers=4, pin_memory=True, persistent_workers=True)
 valid_loader = DataLoader(valid_dataset, batch_size=args.batch_size_finetune, shuffle=False, drop_last=False, num_workers=4, pin_memory=True, persistent_workers=True)
 test_loader = DataLoader(test_dataset, batch_size=args.batch_size_finetune, shuffle=False, drop_last=False, num_workers=4, pin_memory=True, persistent_workers=True)

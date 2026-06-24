@@ -48,24 +48,30 @@ VIEW_LABEL = {
     'v2logsig_nview': 'logsig\n(2-view)',
 }
 
-WINDOW_ORDER = ['global', 'win64', 'win128', 'win128_s7', 'tukey64', 'tukey128', 'tukey128_s7']
+WINDOW_ORDER = ['global', 'win64', 'norm_win64', 'norm_win64_lag', 'win64_lsn0.1', 'win128', 'win128_s7', 'tukey64', 'tukey128', 'tukey128_s7']
 WINDOW_LABEL = {
-    'global':      'global',
-    'win64':       'win 64',
-    'win128':      'win 128',
-    'win128_s7':   'win 128\ns7',
-    'tukey64':     'tukey 64',
-    'tukey128':    'tukey 128',
-    'tukey128_s7': 'tukey 128\ns7',
+    'global':        'global',
+    'win64':         'win 64',
+    'norm_win64':    'norm win 64',
+    'norm_win64_lag':'norm win 64\n+lag',
+    'win64_lsn0.1':  'win 64\n+lsn',
+    'win128':        'win 128',
+    'win128_s7':     'win 128\ns7',
+    'tukey64':       'tukey 64',
+    'tukey128':      'tukey 128',
+    'tukey128_s7':   'tukey 128\ns7',
 }
 WINDOW_COLOR = {
-    'global':      '#4C72B0',
-    'win64':       '#DD8452',
-    'win128':      '#55A868',
-    'win128_s7':   '#2CA02C',
-    'tukey64':     '#C44E52',
-    'tukey128':    '#8172B3',
-    'tukey128_s7': '#6B4C9A',
+    'global':        '#4C72B0',
+    'win64':         '#DD8452',
+    'norm_win64':    '#C8860A',
+    'norm_win64_lag':'#95190C',
+    'win64_lsn0.1':  '#17BECF',
+    'win128':        '#55A868',
+    'win128_s7':     '#2CA02C',
+    'tukey64':       '#C44E52',
+    'tukey128':      '#8172B3',
+    'tukey128_s7':   '#6B4C9A',
 }
 
 ENCODERS = ['transformer', 'transformer_plast', 'mlp_logsig',
@@ -96,7 +102,7 @@ VIEW_SEP  = 1.20
 
 SUB_W_2 = 2 * BAR_W + INNER_GAP
 SUB_W_3 = 3 * BAR_W + 2 * INNER_GAP
-_BIL_WIN_SET = {'win64', 'win128', 'tukey128'}
+_BIL_WIN_SET = {'win64', 'norm_win64', 'win64_lsn0.1', 'win128', 'tukey128'}
 LOGSIG_SPAN = (
     SUB_W_3
     + sum(SUB_W_3 if w in _BIL_WIN_SET else SUB_W_2 for w in WINDOW_ORDER[1:])
@@ -167,10 +173,16 @@ def parse_finetune_row(name: str):
     view_key = m.group(1)
 
     window = 'global'
-    for w in ('win128_s7', 'tukey128_s7', 'win64', 'win128', 'tukey64', 'tukey128'):
-        if f'_{w}_' in name or f'_{w}.' in name:
-            window = w
-            break
+    if '_win64_norm' in name:
+        window = 'norm_win64_lag' if '_lag' in name else 'norm_win64'
+    else:
+        for w in ('win128_s7', 'tukey128_s7', 'win64', 'win128', 'tukey64', 'tukey128'):
+            if f'_{w}_' in name or f'_{w}.' in name:
+                window = w
+                break
+        lsn_m = re.search(r'_lsn([\d.]+)_', name)
+        if lsn_m:
+            window = f'{window}_lsn{lsn_m.group(1)}'
 
     return view_key, window, encoder
 
@@ -233,8 +245,9 @@ def plot_dataset(ax, scores, title, metric_label, baseline_mean=None):
             hatch = ENC_HATCH[enc]
             ax.bar(cx + rel_x, mu, BAR_W, color=color, hatch=hatch,
                    edgecolor='white', linewidth=0.4, alpha=0.9)
-            ax.errorbar(cx + rel_x, mu, yerr=ci, fmt='none',
-                        ecolor='black', elinewidth=0.8, capsize=2)
+            ax.errorbar(cx + rel_x, mu,
+                        yerr=[[min(ci, mu)], [min(ci, 1.0 - mu)]],
+                        fmt='none', ecolor='black', elinewidth=0.8, capsize=2)
 
     # Baseline reference line
     if baseline_mean is not None:
@@ -244,7 +257,7 @@ def plot_dataset(ax, scores, title, metric_label, baseline_mean=None):
     # x-axis labels
     ax.set_xticks([view_centers[v] for v in VIEW_ORDER])
     ax.set_xticklabels([VIEW_LABEL[v] for v in VIEW_ORDER], fontsize=8)
-    ax.set_xlim(-VIEW_SEP * 0.6, (len(VIEW_ORDER) - 1) * VIEW_SEP + VIEW_SEP * 0.6)
+    ax.set_xlim(-(LOGSIG_SPAN / 2 + 0.12), (len(VIEW_ORDER) - 1) * VIEW_SEP + LOGSIG_SPAN / 2 + 0.12)
 
     ax.set_ylabel(metric_label, fontsize=9)
     ax.set_title(title, fontsize=10, fontweight='bold')
@@ -288,7 +301,7 @@ def main():
     parser.add_argument('--metric', default='accuracy',
                         choices=['accuracy', 'f1_score'],
                         help='Metric column to visualise')
-    parser.add_argument('--out', default='capture24_results.pdf',
+    parser.add_argument('--out', default='plots/capture24_results.pdf',
                         help='Output file (pdf/png/svg)')
     args = parser.parse_args()
 
@@ -335,6 +348,7 @@ def main():
                  fontsize=12, fontweight='bold', y=1.01)
     plt.tight_layout(rect=[0, 0.06, 1, 1])
 
+    os.makedirs(os.path.dirname(args.out) or '.', exist_ok=True)
     plt.savefig(args.out, bbox_inches='tight', dpi=150)
     print(f'Saved → {args.out}')
     print(f'Datasets plotted: {[p[0] for p in panels]}')

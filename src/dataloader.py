@@ -70,6 +70,72 @@ def _smooth_ema(X: torch.Tensor, alpha: float) -> torch.Tensor:
         out[:, t, :] = alpha * X[:, t, :] + (1 - alpha) * out[:, t - 1, :]
     return out
 
+def normalize_logsig_levels(
+    logsig: torch.Tensor,
+    depth: int,
+    path_dim: int,
+    num_copies: int = 1,
+    global_time: bool = False,
+    stats: list = None,
+):
+    """Normalize each level of the log-signature features to have zero mean and unit variance.
+
+    Each truncation level gets one shared mean and std (scalar), computed over all
+    samples, timesteps, and feature dimensions within that level.  For stacked
+    multi-smooth signatures num_copies must equal K so that every copy is covered.
+
+    Args:
+        logsig:      [N, L, C] log-signature features.
+        depth:       truncation depth of the log-signature.
+        path_dim:    path dimensionality including the prepended time channel
+                     (i.e. num_input_features + 1).
+        num_copies:  number of stacked signature copies (K from multi_smooth_params).
+        global_time: if True, the last channel is a global time feature and is
+                     normalized with its own global z-score.
+        stats:       list of (mean, std) tensors per level (output of a prior call
+                     with stats=None).  When provided, these are applied instead of
+                     computing fresh statistics from logsig — use this to apply
+                     training-set statistics to the test split.
+    Returns:
+        (logsig_norm, stats): normalized [N, L, C] tensor and the list of
+        (mean, std) pairs that were used, in level order (+ global_time entry last).
+    """
+    level_bounds = []
+    prev = 0
+    for k in range(1, depth + 1):
+        end = logsigdim(path_dim, k)
+        level_bounds.append((prev, end))
+        prev = end
+    C_sig = prev  # logsigdim(path_dim, depth)
+
+    logsig_norm = logsig.clone()
+    computed_stats = []
+    stat_idx = 0
+    for c in range(num_copies):
+        base = c * C_sig
+        for lvl_start, lvl_end in level_bounds:
+            sl = slice(base + lvl_start, base + lvl_end)
+            if stats is None:
+                mean = logsig[..., sl].mean()
+                std = logsig[..., sl].std().clamp(min=1e-8)
+                computed_stats.append((mean, std))
+            else:
+                mean, std = stats[stat_idx]
+                stat_idx += 1
+            logsig_norm[..., sl] = (logsig[..., sl] - mean) / std
+
+    if global_time:
+        if stats is None:
+            mean = logsig[..., -1].mean()
+            std = logsig[..., -1].std().clamp(min=1e-8)
+            computed_stats.append((mean, std))
+        else:
+            mean, std = stats[stat_idx]
+        logsig_norm[..., -1] = (logsig[..., -1] - mean) / std
+
+    return logsig_norm, computed_stats if stats is None else stats
+
+
 
 def get_logsig(
     X: torch.Tensor,
@@ -81,6 +147,7 @@ def get_logsig(
     stride: int = 1,
     global_time: bool = False,
     multi_smooth_params: list = None,
+    normalize: bool = True,
 ) -> torch.Tensor:
     """Log signature view of the time-augmented path.
 
@@ -144,6 +211,8 @@ def get_logsig(
         result = torch.cat([pad, logsig], dim=1)              # [N, L, C_sig]
         if global_time:
             result = torch.cat([result, t], dim=-1)           # [N, L, C_sig+1]
+        if normalize:
+            result, _ = normalize_logsig_levels(result, depth, path_dim=D + 1, num_copies=1, global_time=global_time)
         return result
 
     # Windowed modes
@@ -199,6 +268,8 @@ def get_logsig(
 
         out[:, out_idx, :] = sig_val
 
+    if normalize:
+        out, _ = normalize_logsig_levels(out, depth, path_dim=D + 1, num_copies=K, global_time=global_time)
     return out
 
 
@@ -222,6 +293,7 @@ def preprocess_data(X_train, X_test, views=('xt', 'dx', 'xf'), logsig_depth=2,
                     logsig_smoothing='tukey', logsig_smooth_param=0.5,
                     logsig_stride=1, logsig_global_time=False,
                     logsig_multi_smooth_params=None,
+                    logsig_normalize=False,
                     time_as_feature=False,
                     logsig_cache_key=None,
                     pca_components=None):
@@ -288,6 +360,7 @@ def preprocess_data(X_train, X_test, views=('xt', 'dx', 'xf'), logsig_depth=2,
                 smooth_param=logsig_smooth_param, stride=logsig_stride,
                 global_time=logsig_global_time,
                 multi_smooth_params=logsig_multi_smooth_params,
+                normalize=False,  # per-level norm applied below using train stats
             )
             if logsig_cache_key:
                 _cdir = 'preprocessed_data/.logsig_cache'
@@ -313,6 +386,16 @@ def preprocess_data(X_train, X_test, views=('xt', 'dx', 'xf'), logsig_depth=2,
             else:
                 data_tr = get_logsig(X_train_xt, **_logsig_kw)
                 data_te = get_logsig(X_test_xt,  **_logsig_kw)
+            if logsig_normalize:
+                _n_copies = len(logsig_multi_smooth_params) if logsig_multi_smooth_params else 1
+                _nlvl_kw = dict(
+                    depth=logsig_depth,
+                    path_dim=X_train_xt.shape[-1] + 1,
+                    num_copies=_n_copies,
+                    global_time=logsig_global_time,
+                )
+                data_tr, _norm_stats = normalize_logsig_levels(data_tr, **_nlvl_kw)
+                data_te, _ = normalize_logsig_levels(data_te, **_nlvl_kw, stats=_norm_stats)
             data_tr, data_te, mean, std = normalize(data_tr, data_te)
         else:
             raise ValueError(f"Unknown view '{view}'. Choose from: xt, dx, xf, logsig")
@@ -325,12 +408,15 @@ def preprocess_data(X_train, X_test, views=('xt', 'dx', 'xf'), logsig_depth=2,
 class Load_Dataset(Dataset):
     def __init__(self, X: list, X_aug: list, y: torch.Tensor,
                  mode: str, num_repeats: int = 1,
-                 views: tuple = ('xt', 'dx', 'xf')):
+                 views: tuple = ('xt', 'dx', 'xf'),
+                 aug_fns: Optional[list] = None):
         super(Load_Dataset, self).__init__()
 
         self.mode = mode
         self.num_repeats = num_repeats
         self.views = views
+        # aug_fns: optional list of callables (one per view) overriding _aug_fn_for_view
+        self.aug_fns = aug_fns
 
         if self.mode == 'pretrain':
             self.setup_pretrain_data(X, X_aug, y)
@@ -356,7 +442,10 @@ class Load_Dataset(Dataset):
         return self.xt.shape[0]
 
     def __getitem__(self, idx: int) -> Tuple[torch.Tensor, ...]:
-        aug1, aug2, aug3 = [_aug_fn_for_view(v) for v in self.views]
+        if self.aug_fns is not None:
+            aug1, aug2, aug3 = self.aug_fns
+        else:
+            aug1, aug2, aug3 = [_aug_fn_for_view(v) for v in self.views]
         if self.mode == 'pretrain':
             return (self.xt_aug[idx], self.dx_aug[idx], self.xf_aug[idx],
                     aug1(self.xt_aug[idx]), aug2(self.dx_aug[idx]), aug3(self.xf_aug[idx]),
@@ -403,4 +492,62 @@ def _aug_fn_for_view(view: str):
         return lambda x: x
     else:
         return Load_Dataset.data_transform_td
+
+
+def _make_logsig_noise_aug(
+    noise_scale: float,
+    logsig_train_data: torch.Tensor,
+    depth: int,
+    path_dim: int,
+    has_global_time: bool = False,
+    num_copies: int = 1,
+):
+    """Return a logsig augmentation function that adds per-level Gaussian noise.
+
+    For each depth-k level, noise ~ N(0, noise_scale * std_k) where std_k is
+    the std of that level's features computed over the full training set.
+    Setting noise_scale=0.1 adds noise at one tenth of each level's training
+    std, automatically tracking the order of magnitude of each level.
+
+    Args:
+        noise_scale:        fraction of each level's training std to use as
+                            noise std (e.g. 0.1 = 10 %).
+        logsig_train_data:  preprocessed training tensor [N, T, C] used to
+                            compute per-level stds.
+        depth:              log-signature truncation depth.
+        path_dim:           path dimensionality including the prepended time
+                            channel (i.e. num_input_features + 1).
+        has_global_time:    if True, a global-time scalar is appended after the
+                            signature features — it is left unperturbed.
+        num_copies:         K for multi_smooth_params (K stacked signatures).
+    """
+    level_bounds = []
+    prev = 0
+    for k in range(1, depth + 1):
+        end = logsigdim(path_dim, k)
+        level_bounds.append((prev, end))
+        prev = end
+    C_sig = prev  # logsigdim(path_dim, depth)
+
+    # Pre-compute fixed noise stds from training data (one scalar per level per copy)
+    level_noise_stds = []
+    for c in range(num_copies):
+        base = c * C_sig
+        for lvl_start, lvl_end in level_bounds:
+            sl = slice(base + lvl_start, base + lvl_end)
+            train_std = float(logsig_train_data[..., sl].std().clamp(min=1e-8))
+            level_noise_stds.append(noise_scale * train_std)
+
+    def aug(x: torch.Tensor) -> torch.Tensor:
+        out = x.clone()
+        idx = 0
+        for c in range(num_copies):
+            base = c * C_sig
+            for lvl_start, lvl_end in level_bounds:
+                sl = slice(base + lvl_start, base + lvl_end)
+                out[..., sl] = x[..., sl] + level_noise_stds[idx] * torch.randn_like(x[..., sl])
+                idx += 1
+        return out
+
+    return aug
 

@@ -6,7 +6,9 @@
       "Bash(python3 -c ' *)",
       "Bash(python3)",
       "Bash(tmux capture-pane *)",
-      "Bash(nvidia-smi --query-gpu=index,utilization.gpu,memory.used --format=csv,noheader)"
+      "Bash(nvidia-smi --query-gpu=index,utilization.gpu,memory.used --format=csv,noheader)",
+      "WebSearch",
+      "Read(//proc/**)"
     ]
   }
 }

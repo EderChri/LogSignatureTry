@@ -1,4 +1,5 @@
 #!/bin/bash
+cd "$(dirname "$0")/.." || exit 1
 # run_missing_finetunes.sh
 # Run the finetune jobs missing multi-seed coverage (seeds 1-9).
 #
@@ -97,7 +98,7 @@ for PAIR in sleepeeg_epilepsy harth_har70plus; do
       fi
       TAG="ft_${FT}_from_${PT_TAG}"
       _launch_if_new "$FT_OUT" "$TAG" "logs/${TAG}.log" \
-        python run_finetune.py \
+        python scripts/run_finetune.py \
           --data_name "${FT}" \
           --pretrain_data_name "${PT}" \
           --num_feature "${FT_NF}" \
@@ -130,7 +131,7 @@ for PAIR in sleepeeg_epilepsy harth_har70plus; do
     fi
     TAG="ft2v_${FT}_from_${PT_TAG}"
     _launch_if_new "$FT_OUT" "$TAG" "logs/${TAG}.log" \
-      python run_finetune_nview.py \
+      python scripts/run_finetune_nview.py \
         --data_name "${FT}" \
         --pretrain_data_name "${PT}" \
         --num_feature "${FT_NF}" \
@@ -168,7 +169,7 @@ for PAIR in sleepeeg_epilepsy harth_har70plus; do
           fi
           TAG="ft_${FT}_from_${PT_TAG}"
           _launch_if_new "$FT_OUT" "$TAG" "logs/${TAG}.log" \
-            python run_finetune.py \
+            python scripts/run_finetune.py \
               --data_name "${FT}" \
               --pretrain_data_name "${PT}" \
               --num_feature "${FT_NF}" \
@@ -197,4 +198,4 @@ done
 wait
 echo ""
 echo "All 198 missing finetune jobs complete."
-echo "Run:  python aggregate_results.py && python visualize_results.py"
+echo "Run:  python scripts/aggregate_results.py && python vis/visualize_results.py"
