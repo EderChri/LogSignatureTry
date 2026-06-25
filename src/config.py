@@ -52,13 +52,6 @@ def get_args_parser():
     parser.add_argument('--temperature', default=0.07, type=float)
     parser.add_argument('--lam', default=0.0, type=float)
     parser.add_argument('--partial', default=1.0, type=float)
-    parser.add_argument('--cross_view_logsig', action='store_true',
-                        help='Replace logsig intra-view loss with cross-view NT-Xent '
-                             '(xt↔logsig and dx↔logsig). Adds clean pre-interaction '
-                             'projection heads; logsig identity-aug term is dropped.')
-    parser.add_argument('--lam_cross', default=1.0, type=float,
-                        help='Weight for cross-view NT-Xent terms when --cross_view_logsig is set')
-
     # Cross-dataset transfer: pretrain on one dataset, finetune on another
     parser.add_argument('--pretrain_data_name', default=None, type=str,
                         help='data_name of the pretrained model; defaults to --data_name')
@@ -71,8 +64,9 @@ def get_args_parser():
     # View configuration (view1 is always 'xt')
     parser.add_argument('--view2', default='dx', type=str,
                         help="Second view: 'dx', 'xf', or 'logsig'")
-    parser.add_argument('--view3', default='xf', type=str,
-                        help="Third view: 'dx', 'xf', or 'logsig'")
+    parser.add_argument('--view3', default=None, type=str,
+                        help="Third view: 'dx', 'xf', or 'logsig'. "
+                             "Omit (or leave unset) for 2-view mode.")
 
     # Log signature options
     logsig = parser.add_argument_group('Log signature')
@@ -122,7 +116,7 @@ def get_args_parser():
                              'is the std of that level computed over the training set. '
                              'E.g. 0.1 adds noise at 10%% of each level\'s training std, '
                              'automatically tracking the order of magnitude of each level. '
-                             '0.0 = disabled (default). Ignored when --cross_view_logsig is set.')
+                             '0.0 = disabled (default).')
     logsig.add_argument('--logsig_normalize', action='store_true',
                         help='Normalize log-signature features per truncation level (z-score with '
                              'one shared mean/std per level, computed over all samples and timesteps). '

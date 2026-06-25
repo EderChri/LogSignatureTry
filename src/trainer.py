@@ -1,6 +1,5 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 import os
 from torch.amp import autocast, GradScaler
 from pytorch_metric_learning import losses
@@ -11,219 +10,144 @@ def _tqdm_disabled() -> bool:
     return os.environ.get('TQDM_DISABLE', '0').strip().lower() in {'1', 'true', 'yes', 'on'}
 
 
-def add_weight_regularization(model, l1_scale=0.0, l2_scale=0.01):
-    l1_reg, l2_reg = 0.0, 0.0
-
-    for parameter in model.parameters():
-        if parameter.requires_grad:
-            l1_reg += l1_scale * parameter.abs().sum()
-            l2_reg += l2_scale * parameter.pow(2).sum()
-            
-    return l1_reg + l2_reg
+def add_weight_regularization(model, l2_scale=0.01):
+    return sum(l2_scale * p.pow(2).sum() for p in model.parameters() if p.requires_grad)
 
 
-def get_loss_by_type(loss_type, loss_t, loss_d, loss_f):
-    loss_dict = {
-        'ALL': loss_t + loss_d + loss_f,
-        'TDF': loss_t + loss_d + loss_f,
-        'TD': loss_t + loss_d,
-        'TF': loss_t + loss_f,
-        'DF': loss_d + loss_f,
-        'T': loss_t,
-        'D': loss_d,
-        'F': loss_f
-    }
-    if loss_type not in loss_dict:
-        raise ValueError(f"Invalid loss type: {loss_type}")
-    return loss_dict[loss_type]
+def _is_input_layer(name: str) -> bool:
+    """True for input-projection params inside EncoderNView.branches.
+
+    Param names: branches.<i>.<module>.<...>
+    Unfreeze <module> in {'proj', 'net'} — the input-side weights.
+    Transformer encoder weights live under branches.<i>.enc.* and are frozen.
+    """
+    parts = name.split('.')
+    return len(parts) >= 3 and parts[0] == 'branches' and parts[2] in ('proj', 'net')
 
 
-def train(args, encoder, clf, encoder_optimizer, clf_optimizer, loader, mode='pretrain', device='cuda'):
-    encoder.train() if mode != 'freeze' else encoder.eval() 
-    clf.train() if mode != 'pretrain' else None
+def train(args, encoder, clf, encoder_optimizer, clf_optimizer,
+          loader, mode='pretrain', device='cuda'):
+    """Train one epoch for any number of views.
 
-    if mode == 'pretrain':
-        encoder.train()
-        for param in encoder.parameters():
-            param.requires_grad = True
-        # clf.eval()
-    elif mode == 'finetune':
-        encoder.train()
-        for param in encoder.parameters():
-            param.requires_grad = True
-        clf.train()
-    elif mode == 'freeze':
+    Modes:
+        pretrain — encoder trains, clf ignored.
+        finetune — encoder + clf both train.
+        freeze   — encoder input projections + clf train; rest of encoder frozen.
+    """
+    num_views = encoder.num_views
+
+    if mode == 'freeze':
         encoder.eval()
         for name, param in encoder.named_parameters():
-            if 'input_layer' in name:
-                param.requires_grad = True
-            else:
-                param.requires_grad = False
+            param.requires_grad = _is_input_layer(name)
+    else:
+        encoder.train()
+        for param in encoder.parameters():
+            param.requires_grad = True
+
+    if mode != 'pretrain':
         clf.train()
-    
-    scaler = GradScaler("cuda")
-    
+
+    scaler    = GradScaler("cuda")
     info_loss = losses.NTXentLoss(temperature=args.temperature)
-    info_criterion = losses.SelfSupervisedLoss(info_loss, symmetric=True)
-    criterion = nn.CrossEntropyLoss()
-    
-    total_loss = 0
-    total_loss_c = 0
-    total_samples = 0
-    
+    info_crit = losses.SelfSupervisedLoss(info_loss, symmetric=True)
+    cls_crit  = nn.CrossEntropyLoss()
+
+    total_loss = total_loss_c = total_samples = 0
+
     pbar = tqdm(loader, desc=f"Training ({mode})", disable=_tqdm_disabled(), dynamic_ncols=True)
-    _batch_idx = 0
     for batch in pbar:
-        xt, dx, xf, xt_aug, dx_aug, xf_aug, y = [t.float().to(device) for t in batch]
-        
+        batch      = [t.float().to(device) for t in batch]
+        views_orig = batch[:num_views]
+        views_aug  = batch[num_views: 2 * num_views]
+        y          = batch[2 * num_views].long()
+
         encoder_optimizer.zero_grad()
         if mode != 'pretrain':
             clf_optimizer.zero_grad()
-        
-        _cross_view_logsig = getattr(args, 'cross_view_logsig', False)
+
         with autocast("cuda", enabled=True):
-            enc_out     = encoder(xt, dx, xf)
-            enc_out_aug = encoder(xt_aug, dx_aug, xf_aug)
-            if _cross_view_logsig:
-                ht, hd, hf, zt, zd, zf, zt_clean, zd_clean, zf_clean = enc_out
-                ht_aug, hd_aug, hf_aug, zt_aug, zd_aug, zf_aug, _, _, _ = enc_out_aug
-            else:
-                ht, hd, hf, zt, zd, zf = enc_out
-                ht_aug, hd_aug, hf_aug, zt_aug, zd_aug, zf_aug = enc_out_aug
+            hiddens, projs         = encoder(*views_orig)
+            hiddens_aug, projs_aug = encoder(*views_aug)
 
-            loss_t = info_criterion(zt, zt_aug)
-            loss_d = info_criterion(zd, zd_aug)
-
-            if _cross_view_logsig:
-                loss_cross = info_criterion(zt_clean, zf_clean) + info_criterion(zd_clean, zf_clean)
-                loss = loss_t + loss_d + args.lam_cross * loss_cross + add_weight_regularization(encoder)
-                loss_f = loss_cross  # for pbar display only
-            else:
-                loss_f = info_criterion(zf, zf_aug)
-                loss = get_loss_by_type(args.loss_type, loss_t, loss_d, loss_f) + add_weight_regularization(encoder)
-
-            for name, param in encoder.named_parameters():
-                if param.grad is not None:
-                    if torch.isnan(param.grad).any() or torch.isinf(param.grad).any():
-                        print(f"encoder: NaN or Inf in gradients of {name}")
+            contrastive = sum(info_crit(projs[i], projs_aug[i]) for i in range(num_views))
+            loss = contrastive + add_weight_regularization(encoder)
 
             if mode != 'pretrain':
-                logit = clf(zt, zd, zf) if args.feature == 'latent' else clf(ht, hd, hf)
-                loss_c = criterion(logit, y.long())
-                loss = args.lam * loss + loss_c + add_weight_regularization(clf)
-
-                for name, param in clf.named_parameters():
-                    if param.grad is not None:
-                        if torch.isnan(param.grad).any() or torch.isinf(param.grad).any():
-                            print(f"clf: NaN or Inf in gradients of {name}")
+                inputs = projs if args.feature == 'latent' else hiddens
+                logit  = clf(inputs)
+                loss_c = cls_crit(logit, y)
+                loss   = args.lam * loss + loss_c + add_weight_regularization(clf)
 
         scaler.scale(loss).backward()
-
-        # # Gradient clipping
-        # torch.nn.utils.clip_grad_norm_(encoder.parameters(), max_norm=10.0)
-        # if mode != 'pretrain':
-        #     torch.nn.utils.clip_grad_norm_(clf.parameters(), max_norm=10.0)
-
         if mode != 'freeze':
             scaler.step(encoder_optimizer)
         if mode != 'pretrain':
             scaler.step(clf_optimizer)
-
         scaler.update()
 
-        total_loss += loss.item() * xt.size(0)
+        total_loss += loss.item() * y.size(0)
         if mode != 'pretrain':
-            total_loss_c += loss_c.item() * xt.size(0)
-        total_samples += xt.size(0)
-
-        ht_n = ht.norm(dim=-1).mean().item()
-        hd_n = hd.norm(dim=-1).mean().item()
-        hf_n = hf.norm(dim=-1).mean().item()
-        postfix = {'loss': loss.item(), 'loss_t': loss_t.item(), 'loss_d': loss_d.item(), 'loss_f': loss_f.item(),
-                   'ht_n': ht_n, 'hd_n': hd_n, 'hf_n': hf_n}
-        if _cross_view_logsig:
-            postfix['loss_cross'] = loss_cross.item()
-        pbar.set_postfix(postfix)
-        if _batch_idx % 100 == 0:
-            print(f"  [batch {_batch_idx:4d}] ht_n={ht_n:.3f}  hd_n={hd_n:.3f}  hf_n={hf_n:.3f}", flush=True)
-        _batch_idx += 1
-
-    avg_loss = total_loss / total_samples
-    avg_loss_c = total_loss_c / total_samples
+            total_loss_c += loss_c.item() * y.size(0)
+        total_samples += y.size(0)
+        pbar.set_postfix({'loss': loss.item()})
 
     if mode == 'pretrain':
-        return avg_loss
-    else:
-        return avg_loss, avg_loss_c
+        return total_loss / total_samples
+    return total_loss / total_samples, total_loss_c / total_samples
 
 
 def test(args, encoder, clf, loader, mode='pretrain', device='cuda'):
+    """Evaluate one epoch (no gradient updates)."""
+    num_views = encoder.num_views
     encoder.eval()
-    clf.eval() if mode != 'pretrain' else None
+    if mode != 'pretrain':
+        clf.eval()
 
     info_loss = losses.NTXentLoss(temperature=args.temperature)
-    info_criterion = losses.SelfSupervisedLoss(info_loss, symmetric=True)
-    criterion = nn.CrossEntropyLoss()
-    
-    total_loss = 0
-    total_loss_c = 0
-    total_samples = 0
-    
-    _cross_view_logsig = getattr(args, 'cross_view_logsig', False)
+    info_crit = losses.SelfSupervisedLoss(info_loss, symmetric=True)
+    cls_crit  = nn.CrossEntropyLoss()
+
+    total_loss = total_loss_c = total_samples = 0
+
     with torch.no_grad():
         pbar = tqdm(loader, desc=f"Testing ({mode})", disable=_tqdm_disabled(), dynamic_ncols=True)
         for batch in pbar:
-            xt, dx, xf, xt_aug, dx_aug, xf_aug, y = [t.float().to(device) for t in batch]
+            batch      = [t.float().to(device) for t in batch]
+            views_orig = batch[:num_views]
+            views_aug  = batch[num_views: 2 * num_views]
+            y          = batch[2 * num_views].long()
 
             with autocast("cuda", enabled=True):
-                enc_out     = encoder(xt, dx, xf)
-                enc_out_aug = encoder(xt_aug, dx_aug, xf_aug)
-                if _cross_view_logsig:
-                    ht, hd, hf, zt, zd, zf, zt_clean, zd_clean, zf_clean = enc_out
-                    ht_aug, hd_aug, hf_aug, zt_aug, zd_aug, zf_aug, _, _, _ = enc_out_aug
-                else:
-                    ht, hd, hf, zt, zd, zf = enc_out
-                    ht_aug, hd_aug, hf_aug, zt_aug, zd_aug, zf_aug = enc_out_aug
+                hiddens, projs         = encoder(*views_orig)
+                hiddens_aug, projs_aug = encoder(*views_aug)
 
-                loss_t = info_criterion(zt, zt_aug)
-                loss_d = info_criterion(zd, zd_aug)
-
-                if _cross_view_logsig:
-                    loss_cross = info_criterion(zt_clean, zf_clean) + info_criterion(zd_clean, zf_clean)
-                    loss = loss_t + loss_d + args.lam_cross * loss_cross + add_weight_regularization(encoder)
-                    loss_f = loss_cross  # for pbar display only
-                else:
-                    loss_f = info_criterion(zf, zf_aug)
-                    loss = get_loss_by_type(args.loss_type, loss_t, loss_d, loss_f) + add_weight_regularization(encoder)
+                contrastive = sum(info_crit(projs[i], projs_aug[i]) for i in range(num_views))
+                loss = contrastive + add_weight_regularization(encoder)
 
                 if mode != 'pretrain':
-                    logit = clf(zt, zd, zf) if args.feature == 'latent' else clf(ht, hd, hf)
-                    loss_c = criterion(logit, y.long())
-                    loss = args.lam * loss + loss_c + add_weight_regularization(clf)
+                    inputs = projs if args.feature == 'latent' else hiddens
+                    logit  = clf(inputs)
+                    loss_c = cls_crit(logit, y)
+                    loss   = args.lam * loss + loss_c + add_weight_regularization(clf)
 
-            total_loss += loss.item() * xt.size(0)
+            total_loss += loss.item() * y.size(0)
             if mode != 'pretrain':
-                total_loss_c += loss_c.item() * xt.size(0)
-            total_samples += xt.size(0)
+                total_loss_c += loss_c.item() * y.size(0)
+            total_samples += y.size(0)
+            pbar.set_postfix({'loss': loss.item()})
 
-            postfix = {'loss': loss.item(), 'loss_t': loss_t.item(), 'loss_d': loss_d.item(), 'loss_f': loss_f.item(),
-                       'ht_n': ht.norm(dim=-1).mean().item(), 'hd_n': hd.norm(dim=-1).mean().item(), 'hf_n': hf.norm(dim=-1).mean().item()}
-            if _cross_view_logsig:
-                postfix['loss_cross'] = loss_cross.item()
-            pbar.set_postfix(postfix)
-    
-    avg_loss = total_loss / total_samples
-    avg_loss_c = total_loss_c / total_samples
-    
     if mode == 'pretrain':
-        return avg_loss
-    else:
-        return avg_loss, avg_loss_c 
+        return total_loss / total_samples
+    return total_loss / total_samples, total_loss_c / total_samples
 
 
-## Pretrained model loader
+# ---------------------------------------------------------------------------
+# Pretrained model loader
+# ---------------------------------------------------------------------------
+
 def remove_module_prefix(state_dict):
-    # Strip DataParallel ('module.') and torch.compile ('_orig_mod.') prefixes
+    """Strip DataParallel ('module.') and torch.compile ('_orig_mod.') prefixes."""
     new_state_dict = {}
     for key, value in state_dict.items():
         if key.startswith('module.'):
@@ -241,60 +165,43 @@ def load_encoder(encoder, checkpoint_path, new_num_features=None):
 
     Args:
         new_num_features: dict mapping layer name to expected input feature count,
-                          e.g. {'input_layer_t': 6, 'input_layer_d': 21, 'input_layer_f': 6}.
+                          e.g. {'input_layer_t': 6, 'input_layer_d': 21}.
                           Layers whose stored dim differs from the expected dim are
                           re-initialised with Xavier-uniform weights.
                           Pass None to skip dimension checking entirely.
     """
-    # Load trusted local checkpoints across PyTorch versions.
-    # PyTorch >=2.6 defaults to weights_only=True, which cannot load
-    # checkpoints containing argparse.Namespace in metadata.
     try:
         state_dict = torch.load(checkpoint_path, map_location='cpu', weights_only=False)
     except TypeError:
-        # Older PyTorch versions may not support weights_only.
         state_dict = torch.load(checkpoint_path, map_location='cpu')
 
-    # If it's a full checkpoint (not just the state_dict), extract the encoder_state_dict
     if isinstance(state_dict, dict) and 'encoder_state_dict' in state_dict:
         state_dict = state_dict['encoder_state_dict']
 
-    # Remove the 'module.' prefix from multi-GPU training, if present
     state_dict = remove_module_prefix(state_dict)
 
-    # Re-initialise input layers whose feature dimension has changed
     if new_num_features is not None:
         for layer_name, new_dim in new_num_features.items():
             old_weight = state_dict[f'{layer_name}.weight']
-            old_bias = state_dict[f'{layer_name}.bias']
+            old_bias   = state_dict[f'{layer_name}.bias']
             if new_dim != old_weight.size(1):
                 new_weight = nn.Linear(new_dim, old_weight.size(0)).weight.data
                 nn.init.xavier_uniform_(new_weight)
                 state_dict[f'{layer_name}.weight'] = new_weight
-                state_dict[f'{layer_name}.bias'] = torch.zeros_like(old_bias)
-    
-    # Correct any weights that are NaN or Inf
+                state_dict[f'{layer_name}.bias']   = torch.zeros_like(old_bias)
+
     for key, param in state_dict.items():
         if torch.is_tensor(param):
             if torch.isnan(param).any() or torch.isinf(param).any():
-                # Replace NaN and Inf with zero
-                param = torch.nan_to_num(param, nan=0.0, posinf=0.0, neginf=0.0)
-                state_dict[key] = param
-                
-    # Remove
+                state_dict[key] = torch.nan_to_num(param, nan=0.0, posinf=0.0, neginf=0.0)
+
     keys_to_remove = [key for key in state_dict.keys() if 'q_func' in key]
     for key in keys_to_remove:
         state_dict.pop(key)
-    
-    # Drop any keys whose shape doesn't match the current model (e.g. mlp_logsig
-    # input_layer_d.net.0.weight when channel count differs across datasets).
-    # Those layers will keep their freshly-initialised random weights.
-    model_sd = encoder.state_dict()
+
+    model_sd   = encoder.state_dict()
     state_dict = {k: v for k, v in state_dict.items()
                   if k not in model_sd or model_sd[k].shape == v.shape}
 
-    # Load the modified state_dict into the encoder
     encoder.load_state_dict(state_dict, strict=False)
-    
     return encoder
-

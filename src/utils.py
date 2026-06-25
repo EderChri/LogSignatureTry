@@ -1,6 +1,7 @@
 import os
 import sys
 import time
+import json
 import datetime
 import pickle
 import random
@@ -8,6 +9,121 @@ import random
 import numpy as np
 import pandas as pd
 # from sktime.datasets import load_UCR_UEA_dataset, load_from_tsfile_to_dataframe
+
+
+# ---------------------------------------------------------------------------
+# Shared experiment utilities (used by run_pretrain.py and run_finetune.py)
+# ---------------------------------------------------------------------------
+
+def seed_everything(seed: int):
+    import torch
+    os.environ['PYTHONHASHSEED'] = str(seed)
+    np.random.seed(seed)
+    random.seed(seed)
+    torch.manual_seed(seed)
+    torch.random.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = True
+
+
+def _logsig_suffix(args) -> str:
+    """Filename suffix encoding logsig hyperparameters; empty for stream defaults."""
+    mode = getattr(args, 'logsig_mode', 'stream')
+    if mode == 'stream':
+        base = ''
+    else:
+        wsiz = getattr(args, 'logsig_window_size', 32)
+        if mode == 'window':
+            base = f'_win{wsiz}'
+        else:
+            smoothing    = getattr(args, 'logsig_smoothing', 'tukey')
+            smooth_param = getattr(args, 'logsig_smooth_param', 0.5)
+            msp          = getattr(args, 'logsig_multi_smooth_params', None)
+            base = f'_{smoothing}{wsiz}'
+            if msp:
+                k = len([p.strip() for p in msp.split(',')])
+                base += f'_msp{k}'
+            elif smooth_param != 0.5:
+                base += f'_sp{smooth_param}'
+    stride = getattr(args, 'logsig_stride', 1)
+    gt     = getattr(args, 'logsig_global_time', False)
+    pool   = getattr(args, 'logsig_pool', 'auto')
+    depth  = getattr(args, 'logsig_depth', 2)
+    if stride > 1:
+        base += f'_s{stride}'
+    if gt:
+        base += '_gt'
+    if pool != 'auto':
+        base += f'_p{pool}'
+    if depth != 2:
+        base += f'_d{depth}'
+    lsn = getattr(args, 'logsig_noise_scale', 0.0)
+    if lsn > 0.0:
+        base += f'_lsn{lsn}'
+    if getattr(args, 'logsig_normalize', False):
+        base += '_norm'
+    lag = getattr(args, 'logsig_lag', 0)
+    if lag > 0:
+        base += f'_lag{lag}'
+    return base
+
+
+def make_run_tag(args, views: tuple, data_name: str) -> str:
+    """Canonical run tag used for checkpoint and output file naming.
+
+    Args:
+        args:      parsed CLI args.
+        views:     ordered tuple of view names, e.g. ('xt', 'dx', 'xf').
+        data_name: dataset name component for the tag (may differ from
+                   args.data_name for cross-dataset transfer or full-training).
+    """
+    enc_suffix  = f'_{args.encoder_type}' if args.encoder_type != 'transformer' else ''
+    lsig_suffix = _logsig_suffix(args)
+    il_suffix   = ('' if getattr(args, 'interaction_type', 'attention') == 'attention'
+                   else f'_il{args.interaction_type.replace("_", "")}')
+    if len(views) >= 3:
+        view_part = f'_v2{views[1]}_v3{views[2]}'
+    else:
+        view_part = f'_v2{views[1]}'
+    return f'{data_name}{view_part}_ep{args.epochs_pretrain}_{args.seed}{enc_suffix}{lsig_suffix}{il_suffix}'
+
+
+def write_pretrain_summary_row(summary_path: str, run_name: str,
+                               best_valid_loss: float, epochs_trained: int):
+    if not os.path.exists(summary_path):
+        with open(summary_path, 'w') as f:
+            f.write('run_name\tbest_valid_loss\tepochs_trained\n')
+    with open(summary_path, 'a') as f:
+        f.write(f'{run_name}\t{best_valid_loss:.6f}\t{epochs_trained}\n')
+
+
+def write_final_metric_row(summary_path: str, run_name: str,
+                           final_test_score: float, epochs_trained: int):
+    if not os.path.exists(summary_path):
+        with open(summary_path, 'w') as f:
+            f.write('run_name\tfinal_test_score\tepochs_trained\n')
+    with open(summary_path, 'a') as f:
+        f.write(f'{run_name}\t{final_test_score:.6f}\t{epochs_trained}\n')
+
+
+def log_run_config(args, phase: str, views: tuple, output_file: str,
+                   history_path: str = 'run_history.jsonl'):
+    """Append one JSON record to run_history.jsonl at run start.
+
+    Written before training begins so even interrupted runs are logged.
+    Fields: timestamp, phase ('pretrain'|'finetune'), views, output_file, config.
+    """
+    record = {
+        'timestamp': datetime.datetime.now().isoformat(),
+        'phase': phase,
+        'views': list(views),
+        'output_file': output_file,
+        'config': vars(args),
+    }
+    with open(history_path, 'a') as f:
+        f.write(json.dumps(record) + '\n')
 
 
 def normalize(X_train, X_test):

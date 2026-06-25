@@ -406,55 +406,59 @@ def preprocess_data(X_train, X_test, views=('xt', 'dx', 'xf'), logsig_depth=2,
 
 
 class Load_Dataset(Dataset):
+    """N-view dataset — works for any number of views (2, 3, …).
+
+    Args:
+        X:          list of N tensors [num_samples, L, C], one per view.
+        X_aug:      list of N tensors used as the augmentation source.
+                    For pretrain pass the same tensors as X.
+                    For finetune/test X_aug is ignored; X is used and the
+                    augmentation function is applied in __getitem__.
+        y:          label tensor [num_samples].
+        mode:       'pretrain' | 'finetune' | 'test'.
+        views:      ordered sequence of view names (same order as X),
+                    e.g. ('xt', 'dx', 'xf') or ('xt', 'logsig').
+        num_repeats: number of augmented copies generated per sample in
+                    pretrain mode.
+        aug_fns:    optional list of per-view augmentation callables
+                    overriding _aug_fn_for_view.
+
+    __getitem__ returns 2*N + 1 tensors:
+        (view_0, …, view_{N-1}, aug_0, …, aug_{N-1}, y)
+    """
     def __init__(self, X: list, X_aug: list, y: torch.Tensor,
                  mode: str, num_repeats: int = 1,
-                 views: tuple = ('xt', 'dx', 'xf'),
+                 views=('xt', 'dx', 'xf'),
                  aug_fns: Optional[list] = None):
-        super(Load_Dataset, self).__init__()
+        super().__init__()
+        self.mode      = mode
+        self.views     = list(views)
+        self.num_views = len(views)
+        self.aug_fns   = aug_fns if aug_fns is not None else [_aug_fn_for_view(v) for v in views]
 
-        self.mode = mode
-        self.num_repeats = num_repeats
-        self.views = views
-        # aug_fns: optional list of callables (one per view) overriding _aug_fn_for_view
-        self.aug_fns = aug_fns
-
-        if self.mode == 'pretrain':
-            self.setup_pretrain_data(X, X_aug, y)
+        if mode == 'pretrain':
+            self.data     = [self._repeat(x, num_repeats) for x in X]
+            self.data_aug = list(X_aug)
+            self.y = y.long().unsqueeze(-1).repeat(1, num_repeats).reshape(-1)
         else:
-            self.setup_finetune_data(X, y)
+            self.data     = [x.float() for x in X]
+            self.data_aug = self.data   # augmentation applied per-sample in __getitem__
+            self.y = y.long().reshape(-1)
 
-    def setup_pretrain_data(self, X: list, X_aug: list, y: torch.Tensor):
-        self.xt, self.dx, self.xf = X
-        self.xt, self.dx, self.xf = self.get_repeats(self.xt), self.get_repeats(self.dx), self.get_repeats(self.xf)
-        self.xt_aug, self.dx_aug, self.xf_aug = X_aug
-        self.y = y.long().unsqueeze(-1).repeat(1, self.num_repeats).reshape(-1)
-
-    def setup_finetune_data(self, X: torch.Tensor, y: torch.Tensor):
-        self.xt, self.dx, self.xf = X
-        self.xt_aug, self.dx_aug, self.xf_aug = X
-        self.y = y.long().reshape(-1)
-
-    def get_repeats(self, X: torch.Tensor, num_repeats: int = 10):
-        X = X.float().unsqueeze(-1).repeat(1, 1, 1, self.num_repeats)
-        return X.permute(0, 3, 1, 2).reshape(-1, X.shape[1], X.shape[2])
+    @staticmethod
+    def _repeat(x: torch.Tensor, num_repeats: int) -> torch.Tensor:
+        x = x.float().unsqueeze(-1).repeat(1, 1, 1, num_repeats)
+        return x.permute(0, 3, 1, 2).reshape(-1, x.shape[1], x.shape[2])
 
     def __len__(self) -> int:
-        return self.xt.shape[0]
+        return self.data[0].shape[0]
 
     def __getitem__(self, idx: int) -> Tuple[torch.Tensor, ...]:
-        if self.aug_fns is not None:
-            aug1, aug2, aug3 = self.aug_fns
-        else:
-            aug1, aug2, aug3 = [_aug_fn_for_view(v) for v in self.views]
-        if self.mode == 'pretrain':
-            return (self.xt_aug[idx], self.dx_aug[idx], self.xf_aug[idx],
-                    aug1(self.xt_aug[idx]), aug2(self.dx_aug[idx]), aug3(self.xf_aug[idx]),
-                    self.y[idx])
-        else:
-            return (self.xt[idx], self.dx[idx], self.xf[idx],
-                    aug1(self.xt[idx]), aug2(self.dx[idx]), aug3(self.xf[idx]),
-                    self.y[idx])
+        orig = [self.data[i][idx]         for i in range(self.num_views)]
+        aug  = [fn(self.data_aug[i][idx]) for i, fn in enumerate(self.aug_fns)]
+        return (*orig, *aug, self.y[idx])
 
+    # Augmentation helpers kept as static methods for backward compatibility
     @staticmethod
     def data_transform_td(sample: torch.Tensor, sigma: float = 0.1) -> torch.Tensor:
         return sample + torch.normal(mean=0., std=sigma, size=sample.shape, device=sample.device)

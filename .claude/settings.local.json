@@ -8,7 +8,8 @@
       "Bash(tmux capture-pane *)",
       "Bash(nvidia-smi --query-gpu=index,utilization.gpu,memory.used --format=csv,noheader)",
       "WebSearch",
-      "Read(//proc/**)"
+      "Read(//proc/**)",
+      "Bash(nvidia-smi pmon *)"
     ]
   }
 }
