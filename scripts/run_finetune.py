@@ -56,25 +56,9 @@ args.horizon_len = int(args.data_name.split('_')[-1])
 # Build view tuple
 views = ('xt', args.view2) if args.view3 is None else ('xt', args.view2, args.view3)
 
-# Feature-dimension bookkeeping
-_pca_k = getattr(args, 'pca_components', None)
-if _pca_k is not None and _pca_k < args.num_feature:
-    args.num_feature = _pca_k
-if args.num_feature > 64:
-    args.num_feature = 64
-
-_gt       = getattr(args, 'logsig_global_time', False)
-_ft_msp   = getattr(args, 'logsig_multi_smooth_params', None)
-_msp_list = [float(p) for p in _ft_msp.split(',')] if _ft_msp else None
-
-in_dims = [args.num_feature] + [
-    get_view_num_features(v, args.num_feature, args.logsig_depth, _gt, _msp_list)
-    for v in views[1:]
-]
-for i, v in enumerate(views[1:], start=2):
-    setattr(args, f'num_feature_v{i}', in_dims[i - 1])
-
-# Pretrain checkpoint path (must match what run_pretrain.py produces)
+# Pretrain checkpoint path (must match what run_pretrain.py produces).
+# Does not depend on args.num_feature, so this is safe to compute before the
+# feature-dimension bookkeeping below (which needs best_model_path).
 pretrain_tag    = make_run_tag(args, views, args.pretrain_data_name)
 best_model_path = f'model_pretrain/{args.pretrain_data_name}/{pretrain_tag}.pth'
 
@@ -94,6 +78,72 @@ y_te = torch.tensor(y_test)
 del X_tr_raw, X_va_raw, X_te_raw
 gc.collect()
 
+# ── Feature-dimension bookkeeping ───────────────────────────────────────────
+_pca_k             = getattr(args, 'pca_components', None)
+_channel_adapt     = getattr(args, 'channel_adapt', 'none')
+_expand_col_assign = None  # set below for channel_adapt=expand
+# Always mark the requested strategy in the output filename so that sanity-check runs
+# (where channels already match and adaptation is a no-op) produce distinct files from
+# channel_adapt=none, allowing the no-op to be verified rather than silently skipped.
+_chadapt_suffix = f'_ca{_channel_adapt}' if _channel_adapt != 'none' else ''
+
+if _channel_adapt != 'none' and os.path.exists(best_model_path):
+    try:
+        _pt_ckpt = torch.load(best_model_path, map_location='cpu', weights_only=False)
+    except TypeError:
+        _pt_ckpt = torch.load(best_model_path, map_location='cpu')
+    _pretrain_num_feature = getattr(_pt_ckpt['args'], 'num_feature', None)
+    del _pt_ckpt
+
+    if _pretrain_num_feature is not None and _pretrain_num_feature < args.num_feature:
+        if _channel_adapt == 'pca':
+            _manual_pca = getattr(args, 'pca_components', None)
+            if _manual_pca is not None and _manual_pca != _pretrain_num_feature:
+                print(f'[channel_adapt=pca] overriding --pca_components {_manual_pca} -> '
+                      f'{_pretrain_num_feature} to match the pretrain checkpoint', flush=True)
+            _pca_k          = _pretrain_num_feature
+            _chadapt_suffix = f'_capca{_pca_k}'
+            print(f'[channel_adapt=pca] {args.num_feature} -> {_pca_k} components '
+                  f'(matching pretrain {args.pretrain_data_name})', flush=True)
+        elif _channel_adapt == 'drop':
+            from src.channel_adapt import select_channels
+            _kept_idx = select_channels(args.data_name, args.num_feature,
+                                        args.pretrain_data_name, _pretrain_num_feature)
+            X_tr, X_va, X_te = X_tr[..., _kept_idx], X_va[..., _kept_idx], X_te[..., _kept_idx]
+            args.num_feature = len(_kept_idx)
+            _chadapt_suffix  = f'_cadrop{args.num_feature}'
+            print(f'[channel_adapt=drop] kept raw channel indices {_kept_idx} '
+                  f'(matching pretrain {args.pretrain_data_name})', flush=True)
+        elif _channel_adapt == 'expand':
+            from src.channel_adapt import assign_pretrain_columns
+            _expand_col_assign = assign_pretrain_columns(
+                args.data_name, args.num_feature,
+                args.pretrain_data_name, _pretrain_num_feature)
+            _chadapt_suffix = f'_caexpand{args.num_feature}'
+            _unmatched = [fi for fi, pj in enumerate(_expand_col_assign) if pj is None]
+            print(f'[channel_adapt=expand] column assignment: {_expand_col_assign} '
+                  f'({args.num_feature} finetune channels -> {_pretrain_num_feature} pretrain slots'
+                  + (f'; {len(_unmatched)} channels left at random init: {_unmatched}' if _unmatched else '')
+                  + ')', flush=True)
+
+if _pca_k is not None and _pca_k < args.num_feature:
+    args.num_feature = _pca_k
+if args.num_feature > 64:
+    args.num_feature = 64
+
+_gt       = getattr(args, 'logsig_global_time', False)
+_ft_msp   = getattr(args, 'logsig_multi_smooth_params', None)
+_msp_list = [float(p) for p in _ft_msp.split(',')] if _ft_msp else None
+_skip_l1  = getattr(args, 'logsig_skip_level1', False)
+_ll       = getattr(args, 'logsig_lead_lag', 0)
+
+in_dims = [args.num_feature] + [
+    get_view_num_features(v, args.num_feature, args.logsig_depth, _gt, _msp_list, _skip_l1, _ll)
+    for v in views[1:]
+]
+for i, v in enumerate(views[1:], start=2):
+    setattr(args, f'num_feature_v{i}', in_dims[i - 1])
+
 # ── Preprocess views ─────────────────────────────────────────────────────────
 _logsig_kw = dict(
     logsig_depth=args.logsig_depth,
@@ -105,6 +155,8 @@ _logsig_kw = dict(
     logsig_global_time=_gt,
     logsig_multi_smooth_params=_msp_list,
     logsig_normalize=getattr(args, 'logsig_normalize', False),
+    logsig_skip_level1=_skip_l1,
+    logsig_lead_lag=_ll,
     pca_components=_pca_k,
 )
 
@@ -156,7 +208,7 @@ print(args, flush=True)
 def _run_variant(mode_name: str, load_pretrained: bool):
     output_file = (f'out_finetune/{args.data_name}/'
                    f'{args.data_name}_pt-{pretrain_tag}'
-                   f'_{args.feature}_{args.loss_type}_{args.lam}_0_{mode_name}')
+                   f'_{args.feature}_{args.loss_type}_{args.lam}_0{_chadapt_suffix}_{mode_name}')
 
     if os.path.exists(output_file):
         print(f'Output {output_file} already exists. Skipping.')
@@ -170,7 +222,31 @@ def _run_variant(mode_name: str, load_pretrained: bool):
 
     encoder = EncoderNView(args, views=list(views), in_dims=in_dims)
     if load_pretrained:
+        if _chadapt_suffix and _channel_adapt != 'expand':
+            print(f'[channel_adapt={_channel_adapt}] input channels match the pretrain checkpoint '
+                  f'({in_dims[0]}) — branches.0.proj weights will transfer, not reinitialise.',
+                  flush=True)
         encoder = load_encoder(encoder, best_model_path, new_num_features=None)
+        if _channel_adapt == 'expand' and _expand_col_assign is not None:
+            # load_encoder skipped branches.0.proj.weight (shape mismatch: pretrain had fewer
+            # channels). Patch it now by copying each pretrain column to its assigned finetune
+            # column(s). Finetune channels with no valid match (None) keep random init.
+            try:
+                _ckpt_e = torch.load(best_model_path, map_location='cpu', weights_only=False)
+            except TypeError:
+                _ckpt_e = torch.load(best_model_path, map_location='cpu')
+            _pt_w = _ckpt_e['encoder_state_dict'].get('branches.0.proj.weight')
+            if _pt_w is not None:
+                _emb_dim, _k = _pt_w.shape
+                _new_w = torch.zeros(_emb_dim, in_dims[0], dtype=_pt_w.dtype)
+                for _fi, _pj in enumerate(_expand_col_assign):
+                    if _pj is not None:
+                        _new_w[:, _fi] = _pt_w[:, _pj]
+                with torch.no_grad():
+                    encoder.branches[0].proj.weight.data.copy_(_new_w)
+                print(f'[channel_adapt=expand] patched branches.0.proj.weight '
+                      f'{list(_pt_w.shape)} -> {list(_new_w.shape)}', flush=True)
+            del _ckpt_e
     encoder = encoder.to(device)
     clf = ClassifierNView(args, views=list(views)).to(device)
 

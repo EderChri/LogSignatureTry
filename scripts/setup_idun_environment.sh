@@ -18,3 +18,5 @@ python -m ensurepip --upgrade
 python -m pip install --upgrade pip wheel
 python -m pip install --upgrade -r requirements.txt
 python -m pip install --upgrade -r requirements-idun-torch.txt
+python -m pip install --upgrade -r requirements-idun-torch-stack.txt
+python -m pip install --no-deps -e .

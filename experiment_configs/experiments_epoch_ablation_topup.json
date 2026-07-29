@@ -1,0 +1,166 @@
+{
+  "_comment": "Top-up seeds for the 5 configs in plots/epoch_ablation.pdf that only have n=3 (seeds 0-2) at the full 200/100-epoch budget: SleepEEG->Epilepsy logsig, HARTH->HAR70plus logsig, capture24->HAR70plus logsig(pca), capture24->WISDM dx+xf baseline, capture24->WISDM logsig. Adds seeds 3-9 (7 more each) to reach n=10, matching the exact 'fixed' params of the corresponding F-blocks in experiments.json so out_finetune run_name tags line up for visualize_epoch_ablation.py. Run with: python scripts/run_experiments.py experiment_configs/experiments_epoch_ablation_topup.json --gpus 6,7,8",
+  "experiments": [
+    {
+      "name": "F-topup-SleepEEG→Epilepsy: logsig+xf mlp_logsig @ 200/100 epochs, seeds 3-9",
+      "enabled": true,
+      "pretrain": {
+        "data_name": "_DA_SleepEEG_256_00",
+        "num_feature": 1,
+        "num_target": 5
+      },
+      "finetune_targets": [
+        {
+          "data_name": "_DA_Epilepsy_256_00",
+          "num_feature": 1,
+          "num_target": 2
+        }
+      ],
+      "fixed": {
+        "view2": "logsig",
+        "view3": "xf",
+        "encoder_type": "mlp_logsig",
+        "logsig_depth": 2,
+        "logsig_mode": "window",
+        "logsig_window_size": 64,
+        "logsig_normalize": true,
+        "interaction_type": "bilinear",
+        "epochs_pretrain": 200,
+        "epochs_finetune": 100,
+        "batch_size_pretrain": 64,
+        "run_modes": "finetune"
+      },
+      "grid": {
+        "seed": [3, 4, 5, 6, 7, 8, 9]
+      }
+    },
+    {
+      "name": "F-topup-HARTH→HAR70plus: logsig+xf mlp_logsig @ 200/100 epochs, seeds 3-9",
+      "enabled": true,
+      "pretrain": {
+        "data_name": "_DA_HARTH_256_00",
+        "num_feature": 6,
+        "num_target": 12
+      },
+      "finetune_targets": [
+        {
+          "data_name": "_DA_HAR70plus_256_00",
+          "num_feature": 6,
+          "num_target": 7
+        }
+      ],
+      "fixed": {
+        "view2": "logsig",
+        "view3": "xf",
+        "encoder_type": "mlp_logsig",
+        "logsig_depth": 2,
+        "logsig_mode": "window",
+        "logsig_window_size": 64,
+        "logsig_normalize": true,
+        "interaction_type": "bilinear",
+        "epochs_pretrain": 200,
+        "epochs_finetune": 100,
+        "batch_size_pretrain": 128,
+        "run_modes": "finetune"
+      },
+      "grid": {
+        "seed": [3, 4, 5, 6, 7, 8, 9]
+      }
+    },
+    {
+      "name": "F-topup-capture24→HAR70plus: logsig+xf mlp_logsig @ 200/100 epochs, seeds 3-9",
+      "enabled": true,
+      "pretrain": {
+        "data_name": "_DA_capture24_256_00",
+        "num_feature": 3,
+        "num_target": 1
+      },
+      "finetune_targets": [
+        {
+          "data_name": "_DA_HAR70plus_256_00",
+          "num_feature": 6,
+          "num_target": 7,
+          "channel_adapt": "pca"
+        }
+      ],
+      "fixed": {
+        "view2": "logsig",
+        "view3": "xf",
+        "encoder_type": "mlp_logsig",
+        "logsig_depth": 2,
+        "logsig_mode": "window",
+        "logsig_window_size": 64,
+        "logsig_normalize": true,
+        "interaction_type": "bilinear",
+        "epochs_pretrain": 200,
+        "epochs_finetune": 100,
+        "batch_size_pretrain": 128,
+        "run_modes": "finetune"
+      },
+      "grid": {
+        "seed": [3, 4, 5, 6, 7, 8, 9]
+      }
+    },
+    {
+      "name": "F-topup-capture24→WISDM: dx+xf baseline @ 200/100 epochs, seeds 3-9",
+      "enabled": true,
+      "pretrain": {
+        "data_name": "_DA_capture24_256_00",
+        "num_feature": 3,
+        "num_target": 1
+      },
+      "finetune_targets": [
+        {
+          "data_name": "_DA_WISDM_256_00",
+          "num_feature": 3,
+          "num_target": 6
+        }
+      ],
+      "fixed": {
+        "view2": "dx",
+        "view3": "xf",
+        "encoder_type": "transformer",
+        "epochs_pretrain": 200,
+        "epochs_finetune": 100,
+        "batch_size_pretrain": 128,
+        "run_modes": "finetune"
+      },
+      "grid": {
+        "seed": [3, 4, 5, 6, 7, 8, 9]
+      }
+    },
+    {
+      "name": "F-topup-capture24→WISDM: logsig+xf mlp_logsig @ 200/100 epochs, seeds 3-9",
+      "enabled": true,
+      "pretrain": {
+        "data_name": "_DA_capture24_256_00",
+        "num_feature": 3,
+        "num_target": 1
+      },
+      "finetune_targets": [
+        {
+          "data_name": "_DA_WISDM_256_00",
+          "num_feature": 3,
+          "num_target": 6
+        }
+      ],
+      "fixed": {
+        "view2": "logsig",
+        "view3": "xf",
+        "encoder_type": "mlp_logsig",
+        "logsig_depth": 2,
+        "logsig_mode": "window",
+        "logsig_window_size": 64,
+        "logsig_normalize": true,
+        "interaction_type": "bilinear",
+        "epochs_pretrain": 200,
+        "epochs_finetune": 100,
+        "batch_size_pretrain": 128,
+        "run_modes": "finetune"
+      },
+      "grid": {
+        "seed": [3, 4, 5, 6, 7, 8, 9]
+      }
+    }
+  ]
+}

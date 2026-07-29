@@ -108,12 +108,14 @@ if _pca_k is not None and _pca_k < args.num_feature:
 if args.num_feature > 64:
     args.num_feature = 64
 
-_gt      = getattr(args, 'logsig_global_time', False)
-_ls_msp  = getattr(args, 'logsig_multi_smooth_params', None)
+_gt       = getattr(args, 'logsig_global_time', False)
+_ls_msp   = getattr(args, 'logsig_multi_smooth_params', None)
 _msp_list = [float(p) for p in _ls_msp.split(',')] if _ls_msp else None
+_skip_l1  = getattr(args, 'logsig_skip_level1', False)
+_ll       = getattr(args, 'logsig_lead_lag', 0)
 
 in_dims = [args.num_feature] + [
-    get_view_num_features(v, args.num_feature, args.logsig_depth, _gt, _msp_list)
+    get_view_num_features(v, args.num_feature, args.logsig_depth, _gt, _msp_list, _skip_l1, _ll)
     for v in views[1:]
 ]
 # Keep per-view attrs on args for downstream use / checkpoints
@@ -130,9 +132,12 @@ _ls_norm   = getattr(args, 'logsig_normalize', False)
 _msp_key   = ('_msp' + _ls_msp.replace(',', '-')) if _ls_msp else ''
 _pca_key   = f'_pca{_pca_k}' if _pca_k else ''
 _norm_key  = '_norm' if _ls_norm else ''
+_ll_key    = f'_ll{_ll}' if _ll > 0 else ''
+# skip_level1 is applied AFTER the cache, so not baked into the cache key
+# lead_lag changes the computed features, so it IS baked into the cache key
 _logsig_cache_key = (
     f'{_data_tag}_d{args.logsig_depth}_{_ls_mode}'
-    f'_w{_ls_wsiz}_s{_ls_stride}_{_ls_smooth}_sp{_ls_sp}_gt{int(_gt)}{_msp_key}{_pca_key}{_norm_key}'
+    f'_w{_ls_wsiz}_s{_ls_stride}_{_ls_smooth}_sp{_ls_sp}_gt{int(_gt)}{_msp_key}{_pca_key}{_norm_key}{_ll_key}'
 )
 
 print(f'Preprocessing views: {views}', flush=True)
@@ -145,6 +150,8 @@ preprocessed = preprocess_data(
     logsig_stride=_ls_stride, logsig_global_time=_gt,
     logsig_multi_smooth_params=_msp_list,
     logsig_normalize=_ls_norm,
+    logsig_skip_level1=_skip_l1,
+    logsig_lead_lag=_ll,
     logsig_cache_key=_logsig_cache_key,
     pca_components=_pca_k,
 )

@@ -49,7 +49,9 @@ def get_clf_metrics(args, encoder, clf, loader, device):
         y_score = torch.softmax(logit_all, dim=1).cpu().numpy()
 
         accuracy = (y_true == y_pred).mean()
-        precision, recall, f1, _ = precision_recall_fscore_support(
+        precision, recall, f1_macro, _ = precision_recall_fscore_support(
+            y_true, y_pred, average='macro', zero_division=0)
+        _, _, f1_weighted, _ = precision_recall_fscore_support(
             y_true, y_pred, average='weighted', zero_division=0)
         cm = confusion_matrix(y_true, y_pred)
 
@@ -73,7 +75,8 @@ def get_clf_metrics(args, encoder, clf, loader, device):
             'accuracy':         accuracy,
             'precision':        precision,
             'recall':           recall,
-            'f1_score':         f1,
+            'f1_macro':         f1_macro,
+            'f1_weighted':      f1_weighted,
             'confusion_matrix': cm,
             'auroc':            auroc,
             'auprc':            auprc,

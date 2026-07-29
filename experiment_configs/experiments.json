@@ -1,0 +1,1755 @@
+{
+  "_comment": "Consolidated experiment plan. A1 (dx+xf baseline) intentionally omitted - already have results. Groups: A2-A4 main sweep (all 8 dataset pairs x {logsig+xf mlp_logsig, logsig+xf transformer, xt+logsig 2-view} @ 2/10 epochs, 5 seeds); B channel_adapt drop vs pca vs expand on real channel mismatches; C lead-lag/lag sweep; D1 skip-level1 ablation on SleepEEG->Epilepsy + capture24 targets (HARTH->HAR70plus already done); D2 broadened lead-lag x redundancy-penalty grid; F epoch-justification (200/100 vs prior 2/10 results, seeds 0-2, finetune mode only). Run with: python scripts/run_experiments.py experiment_configs/experiments.json --gpus 6,7,8",
+  "experiments": [
+    {
+      "name": "A2-SleepEEG\u2192Epilepsy: logsig+xf mlp_logsig (main sweep)",
+      "enabled": true,
+      "pretrain": {
+        "data_name": "_DA_SleepEEG_256_00",
+        "num_feature": 1,
+        "num_target": 5
+      },
+      "finetune_targets": [
+        {
+          "data_name": "_DA_Epilepsy_256_00",
+          "num_feature": 1,
+          "num_target": 2
+        }
+      ],
+      "fixed": {
+        "view2": "logsig",
+        "view3": "xf",
+        "encoder_type": "mlp_logsig",
+        "logsig_depth": 2,
+        "logsig_mode": "window",
+        "logsig_window_size": 64,
+        "logsig_normalize": true,
+        "interaction_type": "bilinear",
+        "epochs_pretrain": 2,
+        "epochs_finetune": 10,
+        "batch_size_pretrain": 64,
+        "run_modes": "finetune,freeze,baseline"
+      },
+      "grid": {
+        "seed": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ]
+      }
+    },
+    {
+      "name": "A2-HARTH\u2192HAR70plus: logsig+xf mlp_logsig (main sweep)",
+      "enabled": true,
+      "pretrain": {
+        "data_name": "_DA_HARTH_256_00",
+        "num_feature": 6,
+        "num_target": 12
+      },
+      "finetune_targets": [
+        {
+          "data_name": "_DA_HAR70plus_256_00",
+          "num_feature": 6,
+          "num_target": 7
+        }
+      ],
+      "fixed": {
+        "view2": "logsig",
+        "view3": "xf",
+        "encoder_type": "mlp_logsig",
+        "logsig_depth": 2,
+        "logsig_mode": "window",
+        "logsig_window_size": 64,
+        "logsig_normalize": true,
+        "interaction_type": "bilinear",
+        "epochs_pretrain": 2,
+        "epochs_finetune": 10,
+        "batch_size_pretrain": 128,
+        "run_modes": "finetune,freeze,baseline"
+      },
+      "grid": {
+        "seed": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ]
+      }
+    },
+    {
+      "name": "A2-capture24\u2192{WISDM,WISDM2}: logsig+xf mlp_logsig (main sweep, no channel mismatch)",
+      "enabled": true,
+      "pretrain": {
+        "data_name": "_DA_capture24_256_00",
+        "num_feature": 3,
+        "num_target": 1
+      },
+      "finetune_targets": [
+        {
+          "data_name": "_DA_WISDM_256_00",
+          "num_feature": 3,
+          "num_target": 6
+        },
+        {
+          "data_name": "_DA_WISDM2_256_00",
+          "num_feature": 3,
+          "num_target": 6
+        }
+      ],
+      "fixed": {
+        "view2": "logsig",
+        "view3": "xf",
+        "encoder_type": "mlp_logsig",
+        "logsig_depth": 2,
+        "logsig_mode": "window",
+        "logsig_window_size": 64,
+        "logsig_normalize": true,
+        "interaction_type": "bilinear",
+        "epochs_pretrain": 2,
+        "epochs_finetune": 10,
+        "batch_size_pretrain": 128,
+        "run_modes": "finetune,freeze,baseline"
+      },
+      "grid": {
+        "seed": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ]
+      }
+    },
+    {
+      "name": "A2-capture24\u2192{HAR70plus,USC_HAD,Opportunity,Skoda}: logsig+xf mlp_logsig (main sweep, channel_adapt=pca)",
+      "enabled": true,
+      "pretrain": {
+        "data_name": "_DA_capture24_256_00",
+        "num_feature": 3,
+        "num_target": 1
+      },
+      "finetune_targets": [
+        {
+          "data_name": "_DA_HAR70plus_256_00",
+          "num_feature": 6,
+          "num_target": 7,
+          "channel_adapt": "pca"
+        },
+        {
+          "data_name": "_DA_USC_HAD_256_00",
+          "num_feature": 6,
+          "num_target": 12,
+          "channel_adapt": "pca"
+        },
+        {
+          "data_name": "_DA_Opportunity_256_00",
+          "num_feature": 113,
+          "num_target": 18,
+          "channel_adapt": "pca"
+        },
+        {
+          "data_name": "_DA_Skoda_256_00",
+          "num_feature": 60,
+          "num_target": 11,
+          "channel_adapt": "pca"
+        }
+      ],
+      "fixed": {
+        "view2": "logsig",
+        "view3": "xf",
+        "encoder_type": "mlp_logsig",
+        "logsig_depth": 2,
+        "logsig_mode": "window",
+        "logsig_window_size": 64,
+        "logsig_normalize": true,
+        "interaction_type": "bilinear",
+        "epochs_pretrain": 2,
+        "epochs_finetune": 10,
+        "batch_size_pretrain": 128,
+        "run_modes": "finetune,freeze,baseline"
+      },
+      "grid": {
+        "seed": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ]
+      }
+    },
+    {
+      "name": "A3-SleepEEG\u2192Epilepsy: logsig+xf transformer (main sweep)",
+      "enabled": true,
+      "pretrain": {
+        "data_name": "_DA_SleepEEG_256_00",
+        "num_feature": 1,
+        "num_target": 5
+      },
+      "finetune_targets": [
+        {
+          "data_name": "_DA_Epilepsy_256_00",
+          "num_feature": 1,
+          "num_target": 2
+        }
+      ],
+      "fixed": {
+        "view2": "logsig",
+        "view3": "xf",
+        "encoder_type": "transformer",
+        "logsig_depth": 2,
+        "logsig_mode": "window",
+        "logsig_window_size": 64,
+        "logsig_normalize": true,
+        "interaction_type": "bilinear",
+        "epochs_pretrain": 2,
+        "epochs_finetune": 10,
+        "batch_size_pretrain": 64,
+        "run_modes": "finetune,freeze,baseline"
+      },
+      "grid": {
+        "seed": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ]
+      }
+    },
+    {
+      "name": "A3-HARTH\u2192HAR70plus: logsig+xf transformer (main sweep)",
+      "enabled": true,
+      "pretrain": {
+        "data_name": "_DA_HARTH_256_00",
+        "num_feature": 6,
+        "num_target": 12
+      },
+      "finetune_targets": [
+        {
+          "data_name": "_DA_HAR70plus_256_00",
+          "num_feature": 6,
+          "num_target": 7
+        }
+      ],
+      "fixed": {
+        "view2": "logsig",
+        "view3": "xf",
+        "encoder_type": "transformer",
+        "logsig_depth": 2,
+        "logsig_mode": "window",
+        "logsig_window_size": 64,
+        "logsig_normalize": true,
+        "interaction_type": "bilinear",
+        "epochs_pretrain": 2,
+        "epochs_finetune": 10,
+        "batch_size_pretrain": 128,
+        "run_modes": "finetune,freeze,baseline"
+      },
+      "grid": {
+        "seed": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ]
+      }
+    },
+    {
+      "name": "A3-capture24\u2192{WISDM,WISDM2}: logsig+xf transformer (main sweep, no channel mismatch)",
+      "enabled": true,
+      "pretrain": {
+        "data_name": "_DA_capture24_256_00",
+        "num_feature": 3,
+        "num_target": 1
+      },
+      "finetune_targets": [
+        {
+          "data_name": "_DA_WISDM_256_00",
+          "num_feature": 3,
+          "num_target": 6
+        },
+        {
+          "data_name": "_DA_WISDM2_256_00",
+          "num_feature": 3,
+          "num_target": 6
+        }
+      ],
+      "fixed": {
+        "view2": "logsig",
+        "view3": "xf",
+        "encoder_type": "transformer",
+        "logsig_depth": 2,
+        "logsig_mode": "window",
+        "logsig_window_size": 64,
+        "logsig_normalize": true,
+        "interaction_type": "bilinear",
+        "epochs_pretrain": 2,
+        "epochs_finetune": 10,
+        "batch_size_pretrain": 128,
+        "run_modes": "finetune,freeze,baseline"
+      },
+      "grid": {
+        "seed": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ]
+      }
+    },
+    {
+      "name": "A3-capture24\u2192{HAR70plus,USC_HAD,Opportunity,Skoda}: logsig+xf transformer (main sweep, channel_adapt=pca)",
+      "enabled": true,
+      "pretrain": {
+        "data_name": "_DA_capture24_256_00",
+        "num_feature": 3,
+        "num_target": 1
+      },
+      "finetune_targets": [
+        {
+          "data_name": "_DA_HAR70plus_256_00",
+          "num_feature": 6,
+          "num_target": 7,
+          "channel_adapt": "pca"
+        },
+        {
+          "data_name": "_DA_USC_HAD_256_00",
+          "num_feature": 6,
+          "num_target": 12,
+          "channel_adapt": "pca"
+        },
+        {
+          "data_name": "_DA_Opportunity_256_00",
+          "num_feature": 113,
+          "num_target": 18,
+          "channel_adapt": "pca"
+        },
+        {
+          "data_name": "_DA_Skoda_256_00",
+          "num_feature": 60,
+          "num_target": 11,
+          "channel_adapt": "pca"
+        }
+      ],
+      "fixed": {
+        "view2": "logsig",
+        "view3": "xf",
+        "encoder_type": "transformer",
+        "logsig_depth": 2,
+        "logsig_mode": "window",
+        "logsig_window_size": 64,
+        "logsig_normalize": true,
+        "interaction_type": "bilinear",
+        "epochs_pretrain": 2,
+        "epochs_finetune": 10,
+        "batch_size_pretrain": 128,
+        "run_modes": "finetune,freeze,baseline"
+      },
+      "grid": {
+        "seed": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ]
+      }
+    },
+    {
+      "name": "A4-SleepEEG\u2192Epilepsy: xt+logsig 2-view ablation",
+      "enabled": true,
+      "pretrain": {
+        "data_name": "_DA_SleepEEG_256_00",
+        "num_feature": 1,
+        "num_target": 5
+      },
+      "finetune_targets": [
+        {
+          "data_name": "_DA_Epilepsy_256_00",
+          "num_feature": 1,
+          "num_target": 2
+        }
+      ],
+      "fixed": {
+        "view2": "logsig",
+        "encoder_type": "mlp_logsig",
+        "logsig_depth": 2,
+        "logsig_mode": "window",
+        "logsig_window_size": 64,
+        "logsig_normalize": true,
+        "interaction_type": "bilinear",
+        "epochs_pretrain": 2,
+        "epochs_finetune": 10,
+        "batch_size_pretrain": 64,
+        "run_modes": "finetune"
+      },
+      "grid": {
+        "seed": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ]
+      }
+    },
+    {
+      "name": "A4-HARTH\u2192HAR70plus: xt+logsig 2-view ablation",
+      "enabled": true,
+      "pretrain": {
+        "data_name": "_DA_HARTH_256_00",
+        "num_feature": 6,
+        "num_target": 12
+      },
+      "finetune_targets": [
+        {
+          "data_name": "_DA_HAR70plus_256_00",
+          "num_feature": 6,
+          "num_target": 7
+        }
+      ],
+      "fixed": {
+        "view2": "logsig",
+        "encoder_type": "mlp_logsig",
+        "logsig_depth": 2,
+        "logsig_mode": "window",
+        "logsig_window_size": 64,
+        "logsig_normalize": true,
+        "interaction_type": "bilinear",
+        "epochs_pretrain": 2,
+        "epochs_finetune": 10,
+        "batch_size_pretrain": 128,
+        "run_modes": "finetune"
+      },
+      "grid": {
+        "seed": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ]
+      }
+    },
+    {
+      "name": "A4-capture24\u2192{WISDM,WISDM2}: xt+logsig 2-view ablation (no channel mismatch)",
+      "enabled": true,
+      "pretrain": {
+        "data_name": "_DA_capture24_256_00",
+        "num_feature": 3,
+        "num_target": 1
+      },
+      "finetune_targets": [
+        {
+          "data_name": "_DA_WISDM_256_00",
+          "num_feature": 3,
+          "num_target": 6
+        },
+        {
+          "data_name": "_DA_WISDM2_256_00",
+          "num_feature": 3,
+          "num_target": 6
+        }
+      ],
+      "fixed": {
+        "view2": "logsig",
+        "encoder_type": "mlp_logsig",
+        "logsig_depth": 2,
+        "logsig_mode": "window",
+        "logsig_window_size": 64,
+        "logsig_normalize": true,
+        "interaction_type": "bilinear",
+        "epochs_pretrain": 2,
+        "epochs_finetune": 10,
+        "batch_size_pretrain": 128,
+        "run_modes": "finetune"
+      },
+      "grid": {
+        "seed": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ]
+      }
+    },
+    {
+      "name": "A4-capture24\u2192{HAR70plus,USC_HAD,Opportunity,Skoda}: xt+logsig 2-view ablation (channel_adapt=pca)",
+      "enabled": true,
+      "pretrain": {
+        "data_name": "_DA_capture24_256_00",
+        "num_feature": 3,
+        "num_target": 1
+      },
+      "finetune_targets": [
+        {
+          "data_name": "_DA_HAR70plus_256_00",
+          "num_feature": 6,
+          "num_target": 7,
+          "channel_adapt": "pca"
+        },
+        {
+          "data_name": "_DA_USC_HAD_256_00",
+          "num_feature": 6,
+          "num_target": 12,
+          "channel_adapt": "pca"
+        },
+        {
+          "data_name": "_DA_Opportunity_256_00",
+          "num_feature": 113,
+          "num_target": 18,
+          "channel_adapt": "pca"
+        },
+        {
+          "data_name": "_DA_Skoda_256_00",
+          "num_feature": 60,
+          "num_target": 11,
+          "channel_adapt": "pca"
+        }
+      ],
+      "fixed": {
+        "view2": "logsig",
+        "encoder_type": "mlp_logsig",
+        "logsig_depth": 2,
+        "logsig_mode": "window",
+        "logsig_window_size": 64,
+        "logsig_normalize": true,
+        "interaction_type": "bilinear",
+        "epochs_pretrain": 2,
+        "epochs_finetune": 10,
+        "batch_size_pretrain": 128,
+        "run_modes": "finetune"
+      },
+      "grid": {
+        "seed": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ]
+      }
+    },
+    {
+      "name": "B-capture24\u2192{HAR70plus,USC_HAD}: channel_adapt drop vs pca vs expand",
+      "enabled": true,
+      "pretrain": {
+        "data_name": "_DA_capture24_256_00",
+        "num_feature": 3,
+        "num_target": 1
+      },
+      "finetune_targets": [
+        {
+          "data_name": "_DA_HAR70plus_256_00",
+          "num_feature": 6,
+          "num_target": 7
+        },
+        {
+          "data_name": "_DA_USC_HAD_256_00",
+          "num_feature": 6,
+          "num_target": 12
+        }
+      ],
+      "fixed": {
+        "view2": "logsig",
+        "view3": "xf",
+        "encoder_type": "mlp_logsig",
+        "logsig_depth": 2,
+        "logsig_mode": "window",
+        "logsig_window_size": 64,
+        "logsig_normalize": true,
+        "interaction_type": "bilinear",
+        "epochs_pretrain": 2,
+        "epochs_finetune": 10,
+        "batch_size_pretrain": 128,
+        "run_modes": "finetune"
+      },
+      "grid": {
+        "channel_adapt": [
+          "drop",
+          "pca",
+          "expand"
+        ],
+        "seed": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ]
+      }
+    },
+    {
+      "name": "B-capture24\u2192Opportunity: channel_adapt drop vs pca (expand skipped: 113ch broadcast OOMs at batch_size_pretrain 128)",
+      "enabled": true,
+      "pretrain": {
+        "data_name": "_DA_capture24_256_00",
+        "num_feature": 3,
+        "num_target": 1
+      },
+      "finetune_targets": [
+        {
+          "data_name": "_DA_Opportunity_256_00",
+          "num_feature": 113,
+          "num_target": 18
+        }
+      ],
+      "fixed": {
+        "view2": "logsig",
+        "view3": "xf",
+        "encoder_type": "mlp_logsig",
+        "logsig_depth": 2,
+        "logsig_mode": "window",
+        "logsig_window_size": 64,
+        "logsig_normalize": true,
+        "interaction_type": "bilinear",
+        "epochs_pretrain": 2,
+        "epochs_finetune": 10,
+        "batch_size_pretrain": 128,
+        "run_modes": "finetune"
+      },
+      "grid": {
+        "channel_adapt": [
+          "drop",
+          "pca"
+        ],
+        "seed": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ]
+      }
+    },
+    {
+      "name": "B-capture24\u2192Skoda: channel_adapt pca only (drop/expand unsupported: axis=None, no valid mapping)",
+      "enabled": true,
+      "pretrain": {
+        "data_name": "_DA_capture24_256_00",
+        "num_feature": 3,
+        "num_target": 1
+      },
+      "finetune_targets": [
+        {
+          "data_name": "_DA_Skoda_256_00",
+          "num_feature": 60,
+          "num_target": 11
+        }
+      ],
+      "fixed": {
+        "view2": "logsig",
+        "view3": "xf",
+        "encoder_type": "mlp_logsig",
+        "logsig_depth": 2,
+        "logsig_mode": "window",
+        "logsig_window_size": 64,
+        "logsig_normalize": true,
+        "interaction_type": "bilinear",
+        "channel_adapt": "pca",
+        "epochs_pretrain": 2,
+        "epochs_finetune": 10,
+        "batch_size_pretrain": 128,
+        "run_modes": "finetune"
+      },
+      "grid": {
+        "seed": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ]
+      }
+    },
+    {
+      "name": "C-HARTH\u2192HAR70plus (mlp_logsig+bilinear): lead-lag sweep, normalized win64",
+      "enabled": true,
+      "pretrain": {
+        "data_name": "_DA_HARTH_256_00",
+        "num_feature": 6,
+        "num_target": 12
+      },
+      "finetune_targets": [
+        {
+          "data_name": "_DA_HAR70plus_256_00",
+          "num_feature": 6,
+          "num_target": 7
+        }
+      ],
+      "fixed": {
+        "view2": "logsig",
+        "view3": "xf",
+        "encoder_type": "mlp_logsig",
+        "logsig_depth": 2,
+        "logsig_mode": "window",
+        "logsig_window_size": 64,
+        "logsig_normalize": true,
+        "interaction_type": "bilinear",
+        "epochs_pretrain": 2,
+        "epochs_finetune": 10,
+        "batch_size_pretrain": 128,
+        "run_modes": "finetune"
+      },
+      "grid": {
+        "logsig_lead_lag": [
+          8,
+          16,
+          32
+        ],
+        "seed": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ]
+      }
+    },
+    {
+      "name": "C-HARTH\u2192HAR70plus (mlp_logsig+bilinear): lag sweep, normalized win64",
+      "enabled": true,
+      "pretrain": {
+        "data_name": "_DA_HARTH_256_00",
+        "num_feature": 6,
+        "num_target": 12
+      },
+      "finetune_targets": [
+        {
+          "data_name": "_DA_HAR70plus_256_00",
+          "num_feature": 6,
+          "num_target": 7
+        }
+      ],
+      "fixed": {
+        "view2": "logsig",
+        "view3": "xf",
+        "encoder_type": "mlp_logsig",
+        "logsig_depth": 2,
+        "logsig_mode": "window",
+        "logsig_window_size": 64,
+        "logsig_normalize": true,
+        "interaction_type": "bilinear",
+        "epochs_pretrain": 2,
+        "epochs_finetune": 10,
+        "batch_size_pretrain": 128,
+        "run_modes": "finetune"
+      },
+      "grid": {
+        "logsig_lag": [
+          8,
+          16,
+          32
+        ],
+        "seed": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ]
+      }
+    },
+    {
+      "name": "C-capture24\u2192WISDM (mlp_logsig+bilinear): lead-lag sweep, normalized win64",
+      "enabled": true,
+      "pretrain": {
+        "data_name": "_DA_capture24_256_00",
+        "num_feature": 3,
+        "num_target": 1
+      },
+      "finetune_targets": [
+        {
+          "data_name": "_DA_WISDM_256_00",
+          "num_feature": 3,
+          "num_target": 6
+        }
+      ],
+      "fixed": {
+        "view2": "logsig",
+        "view3": "xf",
+        "encoder_type": "mlp_logsig",
+        "logsig_depth": 2,
+        "logsig_mode": "window",
+        "logsig_window_size": 64,
+        "logsig_normalize": true,
+        "interaction_type": "bilinear",
+        "epochs_pretrain": 2,
+        "epochs_finetune": 10,
+        "batch_size_pretrain": 128,
+        "run_modes": "finetune"
+      },
+      "grid": {
+        "logsig_lead_lag": [
+          8,
+          16,
+          32
+        ],
+        "seed": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ]
+      }
+    },
+    {
+      "name": "C-capture24\u2192WISDM (mlp_logsig+bilinear): lag sweep, normalized win64",
+      "enabled": true,
+      "pretrain": {
+        "data_name": "_DA_capture24_256_00",
+        "num_feature": 3,
+        "num_target": 1
+      },
+      "finetune_targets": [
+        {
+          "data_name": "_DA_WISDM_256_00",
+          "num_feature": 3,
+          "num_target": 6
+        }
+      ],
+      "fixed": {
+        "view2": "logsig",
+        "view3": "xf",
+        "encoder_type": "mlp_logsig",
+        "logsig_depth": 2,
+        "logsig_mode": "window",
+        "logsig_window_size": 64,
+        "logsig_normalize": true,
+        "interaction_type": "bilinear",
+        "epochs_pretrain": 2,
+        "epochs_finetune": 10,
+        "batch_size_pretrain": 128,
+        "run_modes": "finetune"
+      },
+      "grid": {
+        "logsig_lag": [
+          8,
+          16,
+          32
+        ],
+        "seed": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ]
+      }
+    },
+    {
+      "name": "C-capture24\u2192HAR70plus (mlp_logsig+bilinear): lead-lag sweep, normalized win64",
+      "enabled": true,
+      "pretrain": {
+        "data_name": "_DA_capture24_256_00",
+        "num_feature": 3,
+        "num_target": 1
+      },
+      "finetune_targets": [
+        {
+          "data_name": "_DA_HAR70plus_256_00",
+          "num_feature": 6,
+          "num_target": 7,
+          "channel_adapt": "pca"
+        }
+      ],
+      "fixed": {
+        "view2": "logsig",
+        "view3": "xf",
+        "encoder_type": "mlp_logsig",
+        "logsig_depth": 2,
+        "logsig_mode": "window",
+        "logsig_window_size": 64,
+        "logsig_normalize": true,
+        "interaction_type": "bilinear",
+        "epochs_pretrain": 2,
+        "epochs_finetune": 10,
+        "batch_size_pretrain": 128,
+        "run_modes": "finetune"
+      },
+      "grid": {
+        "logsig_lead_lag": [
+          8,
+          16,
+          32
+        ],
+        "seed": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ]
+      }
+    },
+    {
+      "name": "C-capture24\u2192HAR70plus (mlp_logsig+bilinear): lag sweep, normalized win64",
+      "enabled": true,
+      "pretrain": {
+        "data_name": "_DA_capture24_256_00",
+        "num_feature": 3,
+        "num_target": 1
+      },
+      "finetune_targets": [
+        {
+          "data_name": "_DA_HAR70plus_256_00",
+          "num_feature": 6,
+          "num_target": 7,
+          "channel_adapt": "pca"
+        }
+      ],
+      "fixed": {
+        "view2": "logsig",
+        "view3": "xf",
+        "encoder_type": "mlp_logsig",
+        "logsig_depth": 2,
+        "logsig_mode": "window",
+        "logsig_window_size": 64,
+        "logsig_normalize": true,
+        "interaction_type": "bilinear",
+        "epochs_pretrain": 2,
+        "epochs_finetune": 10,
+        "batch_size_pretrain": 128,
+        "run_modes": "finetune"
+      },
+      "grid": {
+        "logsig_lag": [
+          8,
+          16,
+          32
+        ],
+        "seed": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ]
+      }
+    },
+    {
+      "name": "C-HARTH\u2192HAR70plus (transformer+bilinear): lead-lag sweep, normalized win64",
+      "enabled": true,
+      "pretrain": {
+        "data_name": "_DA_HARTH_256_00",
+        "num_feature": 6,
+        "num_target": 12
+      },
+      "finetune_targets": [
+        {
+          "data_name": "_DA_HAR70plus_256_00",
+          "num_feature": 6,
+          "num_target": 7
+        }
+      ],
+      "fixed": {
+        "view2": "logsig",
+        "view3": "xf",
+        "encoder_type": "transformer",
+        "logsig_depth": 2,
+        "logsig_mode": "window",
+        "logsig_window_size": 64,
+        "logsig_normalize": true,
+        "interaction_type": "bilinear",
+        "epochs_pretrain": 2,
+        "epochs_finetune": 10,
+        "batch_size_pretrain": 128,
+        "run_modes": "finetune"
+      },
+      "grid": {
+        "logsig_lead_lag": [
+          8,
+          16,
+          32
+        ],
+        "seed": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ]
+      }
+    },
+    {
+      "name": "C-HARTH\u2192HAR70plus (transformer+bilinear): lag sweep, normalized win64",
+      "enabled": true,
+      "pretrain": {
+        "data_name": "_DA_HARTH_256_00",
+        "num_feature": 6,
+        "num_target": 12
+      },
+      "finetune_targets": [
+        {
+          "data_name": "_DA_HAR70plus_256_00",
+          "num_feature": 6,
+          "num_target": 7
+        }
+      ],
+      "fixed": {
+        "view2": "logsig",
+        "view3": "xf",
+        "encoder_type": "transformer",
+        "logsig_depth": 2,
+        "logsig_mode": "window",
+        "logsig_window_size": 64,
+        "logsig_normalize": true,
+        "interaction_type": "bilinear",
+        "epochs_pretrain": 2,
+        "epochs_finetune": 10,
+        "batch_size_pretrain": 128,
+        "run_modes": "finetune"
+      },
+      "grid": {
+        "logsig_lag": [
+          8,
+          16,
+          32
+        ],
+        "seed": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ]
+      }
+    },
+    {
+      "name": "C-capture24\u2192WISDM (transformer+bilinear): lead-lag sweep, normalized win64",
+      "enabled": true,
+      "pretrain": {
+        "data_name": "_DA_capture24_256_00",
+        "num_feature": 3,
+        "num_target": 1
+      },
+      "finetune_targets": [
+        {
+          "data_name": "_DA_WISDM_256_00",
+          "num_feature": 3,
+          "num_target": 6
+        }
+      ],
+      "fixed": {
+        "view2": "logsig",
+        "view3": "xf",
+        "encoder_type": "transformer",
+        "logsig_depth": 2,
+        "logsig_mode": "window",
+        "logsig_window_size": 64,
+        "logsig_normalize": true,
+        "interaction_type": "bilinear",
+        "epochs_pretrain": 2,
+        "epochs_finetune": 10,
+        "batch_size_pretrain": 128,
+        "run_modes": "finetune"
+      },
+      "grid": {
+        "logsig_lead_lag": [
+          8,
+          16,
+          32
+        ],
+        "seed": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ]
+      }
+    },
+    {
+      "name": "C-capture24\u2192WISDM (transformer+bilinear): lag sweep, normalized win64",
+      "enabled": true,
+      "pretrain": {
+        "data_name": "_DA_capture24_256_00",
+        "num_feature": 3,
+        "num_target": 1
+      },
+      "finetune_targets": [
+        {
+          "data_name": "_DA_WISDM_256_00",
+          "num_feature": 3,
+          "num_target": 6
+        }
+      ],
+      "fixed": {
+        "view2": "logsig",
+        "view3": "xf",
+        "encoder_type": "transformer",
+        "logsig_depth": 2,
+        "logsig_mode": "window",
+        "logsig_window_size": 64,
+        "logsig_normalize": true,
+        "interaction_type": "bilinear",
+        "epochs_pretrain": 2,
+        "epochs_finetune": 10,
+        "batch_size_pretrain": 128,
+        "run_modes": "finetune"
+      },
+      "grid": {
+        "logsig_lag": [
+          8,
+          16,
+          32
+        ],
+        "seed": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ]
+      }
+    },
+    {
+      "name": "C-capture24\u2192HAR70plus (transformer+bilinear): lead-lag sweep, normalized win64",
+      "enabled": true,
+      "pretrain": {
+        "data_name": "_DA_capture24_256_00",
+        "num_feature": 3,
+        "num_target": 1
+      },
+      "finetune_targets": [
+        {
+          "data_name": "_DA_HAR70plus_256_00",
+          "num_feature": 6,
+          "num_target": 7,
+          "channel_adapt": "pca"
+        }
+      ],
+      "fixed": {
+        "view2": "logsig",
+        "view3": "xf",
+        "encoder_type": "transformer",
+        "logsig_depth": 2,
+        "logsig_mode": "window",
+        "logsig_window_size": 64,
+        "logsig_normalize": true,
+        "interaction_type": "bilinear",
+        "epochs_pretrain": 2,
+        "epochs_finetune": 10,
+        "batch_size_pretrain": 128,
+        "run_modes": "finetune"
+      },
+      "grid": {
+        "logsig_lead_lag": [
+          8,
+          16,
+          32
+        ],
+        "seed": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ]
+      }
+    },
+    {
+      "name": "C-capture24\u2192HAR70plus (transformer+bilinear): lag sweep, normalized win64",
+      "enabled": true,
+      "pretrain": {
+        "data_name": "_DA_capture24_256_00",
+        "num_feature": 3,
+        "num_target": 1
+      },
+      "finetune_targets": [
+        {
+          "data_name": "_DA_HAR70plus_256_00",
+          "num_feature": 6,
+          "num_target": 7,
+          "channel_adapt": "pca"
+        }
+      ],
+      "fixed": {
+        "view2": "logsig",
+        "view3": "xf",
+        "encoder_type": "transformer",
+        "logsig_depth": 2,
+        "logsig_mode": "window",
+        "logsig_window_size": 64,
+        "logsig_normalize": true,
+        "interaction_type": "bilinear",
+        "epochs_pretrain": 2,
+        "epochs_finetune": 10,
+        "batch_size_pretrain": 128,
+        "run_modes": "finetune"
+      },
+      "grid": {
+        "logsig_lag": [
+          8,
+          16,
+          32
+        ],
+        "seed": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ]
+      }
+    },
+    {
+      "name": "D1-SleepEEG\u2192Epilepsy: logsig skip-level1 ablation",
+      "enabled": true,
+      "pretrain": {
+        "data_name": "_DA_SleepEEG_256_00",
+        "num_feature": 1,
+        "num_target": 5
+      },
+      "finetune_targets": [
+        {
+          "data_name": "_DA_Epilepsy_256_00",
+          "num_feature": 1,
+          "num_target": 2
+        }
+      ],
+      "fixed": {
+        "view2": "logsig",
+        "view3": "xf",
+        "encoder_type": "mlp_logsig",
+        "logsig_depth": 2,
+        "logsig_mode": "window",
+        "logsig_window_size": 64,
+        "logsig_normalize": true,
+        "interaction_type": "bilinear",
+        "epochs_pretrain": 2,
+        "epochs_finetune": 10,
+        "batch_size_pretrain": 64,
+        "run_modes": "finetune",
+        "logsig_skip_level1": true
+      },
+      "grid": {
+        "seed": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ]
+      }
+    },
+    {
+      "name": "D1-capture24\u2192WISDM: logsig skip-level1 ablation",
+      "enabled": true,
+      "pretrain": {
+        "data_name": "_DA_capture24_256_00",
+        "num_feature": 3,
+        "num_target": 1
+      },
+      "finetune_targets": [
+        {
+          "data_name": "_DA_WISDM_256_00",
+          "num_feature": 3,
+          "num_target": 6
+        }
+      ],
+      "fixed": {
+        "view2": "logsig",
+        "view3": "xf",
+        "encoder_type": "mlp_logsig",
+        "logsig_depth": 2,
+        "logsig_mode": "window",
+        "logsig_window_size": 64,
+        "logsig_normalize": true,
+        "interaction_type": "bilinear",
+        "epochs_pretrain": 2,
+        "epochs_finetune": 10,
+        "batch_size_pretrain": 128,
+        "run_modes": "finetune",
+        "logsig_skip_level1": true
+      },
+      "grid": {
+        "seed": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ]
+      }
+    },
+    {
+      "name": "D1-capture24\u2192HAR70plus: logsig skip-level1 ablation",
+      "enabled": true,
+      "pretrain": {
+        "data_name": "_DA_capture24_256_00",
+        "num_feature": 3,
+        "num_target": 1
+      },
+      "finetune_targets": [
+        {
+          "data_name": "_DA_HAR70plus_256_00",
+          "num_feature": 6,
+          "num_target": 7,
+          "channel_adapt": "pca"
+        }
+      ],
+      "fixed": {
+        "view2": "logsig",
+        "view3": "xf",
+        "encoder_type": "mlp_logsig",
+        "logsig_depth": 2,
+        "logsig_mode": "window",
+        "logsig_window_size": 64,
+        "logsig_normalize": true,
+        "interaction_type": "bilinear",
+        "epochs_pretrain": 2,
+        "epochs_finetune": 10,
+        "batch_size_pretrain": 128,
+        "run_modes": "finetune",
+        "logsig_skip_level1": true
+      },
+      "grid": {
+        "seed": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ]
+      }
+    },
+    {
+      "name": "D2-HARTH\u2192HAR70plus: lead-lag x redundancy-penalty sweep",
+      "enabled": true,
+      "pretrain": {
+        "data_name": "_DA_HARTH_256_00",
+        "num_feature": 6,
+        "num_target": 12
+      },
+      "finetune_targets": [
+        {
+          "data_name": "_DA_HAR70plus_256_00",
+          "num_feature": 6,
+          "num_target": 7
+        }
+      ],
+      "fixed": {
+        "view2": "logsig",
+        "view3": "xf",
+        "encoder_type": "mlp_logsig",
+        "logsig_depth": 2,
+        "logsig_mode": "window",
+        "logsig_window_size": 64,
+        "logsig_normalize": true,
+        "interaction_type": "bilinear",
+        "epochs_pretrain": 2,
+        "epochs_finetune": 10,
+        "batch_size_pretrain": 128,
+        "run_modes": "finetune"
+      },
+      "grid": {
+        "logsig_lead_lag": [
+          0,
+          8,
+          16,
+          32
+        ],
+        "redundancy_penalty": [
+          0.001,
+          0.01,
+          0.1
+        ],
+        "seed": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ]
+      }
+    },
+    {
+      "name": "D2-capture24\u2192WISDM: lead-lag x redundancy-penalty sweep",
+      "enabled": true,
+      "pretrain": {
+        "data_name": "_DA_capture24_256_00",
+        "num_feature": 3,
+        "num_target": 1
+      },
+      "finetune_targets": [
+        {
+          "data_name": "_DA_WISDM_256_00",
+          "num_feature": 3,
+          "num_target": 6
+        }
+      ],
+      "fixed": {
+        "view2": "logsig",
+        "view3": "xf",
+        "encoder_type": "mlp_logsig",
+        "logsig_depth": 2,
+        "logsig_mode": "window",
+        "logsig_window_size": 64,
+        "logsig_normalize": true,
+        "interaction_type": "bilinear",
+        "epochs_pretrain": 2,
+        "epochs_finetune": 10,
+        "batch_size_pretrain": 128,
+        "run_modes": "finetune"
+      },
+      "grid": {
+        "logsig_lead_lag": [
+          0,
+          8,
+          16,
+          32
+        ],
+        "redundancy_penalty": [
+          0.001,
+          0.01,
+          0.1
+        ],
+        "seed": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ]
+      }
+    },
+    {
+      "name": "D2-capture24\u2192HAR70plus: lead-lag x redundancy-penalty sweep",
+      "enabled": true,
+      "pretrain": {
+        "data_name": "_DA_capture24_256_00",
+        "num_feature": 3,
+        "num_target": 1
+      },
+      "finetune_targets": [
+        {
+          "data_name": "_DA_HAR70plus_256_00",
+          "num_feature": 6,
+          "num_target": 7,
+          "channel_adapt": "pca"
+        }
+      ],
+      "fixed": {
+        "view2": "logsig",
+        "view3": "xf",
+        "encoder_type": "mlp_logsig",
+        "logsig_depth": 2,
+        "logsig_mode": "window",
+        "logsig_window_size": 64,
+        "logsig_normalize": true,
+        "interaction_type": "bilinear",
+        "epochs_pretrain": 2,
+        "epochs_finetune": 10,
+        "batch_size_pretrain": 128,
+        "run_modes": "finetune"
+      },
+      "grid": {
+        "logsig_lead_lag": [
+          0,
+          8,
+          16,
+          32
+        ],
+        "redundancy_penalty": [
+          0.001,
+          0.01,
+          0.1
+        ],
+        "seed": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ]
+      }
+    },
+    {
+      "name": "F-SleepEEG\u2192Epilepsy: dx+xf baseline @ 200/100 epochs (epoch-justification, cf. A1 @ 2/10)",
+      "enabled": true,
+      "pretrain": {
+        "data_name": "_DA_SleepEEG_256_00",
+        "num_feature": 1,
+        "num_target": 5
+      },
+      "finetune_targets": [
+        {
+          "data_name": "_DA_Epilepsy_256_00",
+          "num_feature": 1,
+          "num_target": 2
+        }
+      ],
+      "fixed": {
+        "view2": "dx",
+        "view3": "xf",
+        "encoder_type": "transformer",
+        "epochs_pretrain": 200,
+        "epochs_finetune": 100,
+        "batch_size_pretrain": 64,
+        "run_modes": "finetune"
+      },
+      "grid": {
+        "seed": [
+          0,
+          1,
+          2
+        ]
+      }
+    },
+    {
+      "name": "F-SleepEEG\u2192Epilepsy: logsig+xf mlp_logsig @ 200/100 epochs (epoch-justification, cf. A2 @ 2/10)",
+      "enabled": true,
+      "pretrain": {
+        "data_name": "_DA_SleepEEG_256_00",
+        "num_feature": 1,
+        "num_target": 5
+      },
+      "finetune_targets": [
+        {
+          "data_name": "_DA_Epilepsy_256_00",
+          "num_feature": 1,
+          "num_target": 2
+        }
+      ],
+      "fixed": {
+        "view2": "logsig",
+        "view3": "xf",
+        "encoder_type": "mlp_logsig",
+        "logsig_depth": 2,
+        "logsig_mode": "window",
+        "logsig_window_size": 64,
+        "logsig_normalize": true,
+        "interaction_type": "bilinear",
+        "epochs_pretrain": 200,
+        "epochs_finetune": 100,
+        "batch_size_pretrain": 64,
+        "run_modes": "finetune"
+      },
+      "grid": {
+        "seed": [
+          0,
+          1,
+          2
+        ]
+      }
+    },
+    {
+      "name": "F-HARTH\u2192HAR70plus: dx+xf baseline @ 200/100 epochs (epoch-justification, cf. A1 @ 2/10)",
+      "enabled": true,
+      "pretrain": {
+        "data_name": "_DA_HARTH_256_00",
+        "num_feature": 6,
+        "num_target": 12
+      },
+      "finetune_targets": [
+        {
+          "data_name": "_DA_HAR70plus_256_00",
+          "num_feature": 6,
+          "num_target": 7
+        }
+      ],
+      "fixed": {
+        "view2": "dx",
+        "view3": "xf",
+        "encoder_type": "transformer",
+        "epochs_pretrain": 200,
+        "epochs_finetune": 100,
+        "batch_size_pretrain": 128,
+        "run_modes": "finetune"
+      },
+      "grid": {
+        "seed": [
+          0,
+          1,
+          2
+        ]
+      }
+    },
+    {
+      "name": "F-HARTH\u2192HAR70plus: logsig+xf mlp_logsig @ 200/100 epochs (epoch-justification, cf. A2 @ 2/10)",
+      "enabled": true,
+      "pretrain": {
+        "data_name": "_DA_HARTH_256_00",
+        "num_feature": 6,
+        "num_target": 12
+      },
+      "finetune_targets": [
+        {
+          "data_name": "_DA_HAR70plus_256_00",
+          "num_feature": 6,
+          "num_target": 7
+        }
+      ],
+      "fixed": {
+        "view2": "logsig",
+        "view3": "xf",
+        "encoder_type": "mlp_logsig",
+        "logsig_depth": 2,
+        "logsig_mode": "window",
+        "logsig_window_size": 64,
+        "logsig_normalize": true,
+        "interaction_type": "bilinear",
+        "epochs_pretrain": 200,
+        "epochs_finetune": 100,
+        "batch_size_pretrain": 128,
+        "run_modes": "finetune"
+      },
+      "grid": {
+        "seed": [
+          0,
+          1,
+          2
+        ]
+      }
+    },
+    {
+      "name": "F-capture24\u2192HAR70plus: dx+xf baseline @ 200/100 epochs (epoch-justification, cf. A1 @ 2/10)",
+      "enabled": true,
+      "pretrain": {
+        "data_name": "_DA_capture24_256_00",
+        "num_feature": 3,
+        "num_target": 1
+      },
+      "finetune_targets": [
+        {
+          "data_name": "_DA_HAR70plus_256_00",
+          "num_feature": 6,
+          "num_target": 7,
+          "channel_adapt": "pca"
+        }
+      ],
+      "fixed": {
+        "view2": "dx",
+        "view3": "xf",
+        "encoder_type": "transformer",
+        "epochs_pretrain": 200,
+        "epochs_finetune": 100,
+        "batch_size_pretrain": 128,
+        "run_modes": "finetune"
+      },
+      "grid": {
+        "seed": [
+          0,
+          1,
+          2
+        ]
+      }
+    },
+    {
+      "name": "F-capture24\u2192HAR70plus: logsig+xf mlp_logsig @ 200/100 epochs (epoch-justification, cf. A2 @ 2/10)",
+      "enabled": true,
+      "pretrain": {
+        "data_name": "_DA_capture24_256_00",
+        "num_feature": 3,
+        "num_target": 1
+      },
+      "finetune_targets": [
+        {
+          "data_name": "_DA_HAR70plus_256_00",
+          "num_feature": 6,
+          "num_target": 7,
+          "channel_adapt": "pca"
+        }
+      ],
+      "fixed": {
+        "view2": "logsig",
+        "view3": "xf",
+        "encoder_type": "mlp_logsig",
+        "logsig_depth": 2,
+        "logsig_mode": "window",
+        "logsig_window_size": 64,
+        "logsig_normalize": true,
+        "interaction_type": "bilinear",
+        "epochs_pretrain": 200,
+        "epochs_finetune": 100,
+        "batch_size_pretrain": 128,
+        "run_modes": "finetune"
+      },
+      "grid": {
+        "seed": [
+          0,
+          1,
+          2
+        ]
+      }
+    },
+    {
+      "name": "F-capture24\u2192WISDM: dx+xf baseline @ 200/100 epochs (epoch-justification, cf. A1 @ 2/10)",
+      "enabled": true,
+      "pretrain": {
+        "data_name": "_DA_capture24_256_00",
+        "num_feature": 3,
+        "num_target": 1
+      },
+      "finetune_targets": [
+        {
+          "data_name": "_DA_WISDM_256_00",
+          "num_feature": 3,
+          "num_target": 6
+        }
+      ],
+      "fixed": {
+        "view2": "dx",
+        "view3": "xf",
+        "encoder_type": "transformer",
+        "epochs_pretrain": 200,
+        "epochs_finetune": 100,
+        "batch_size_pretrain": 128,
+        "run_modes": "finetune"
+      },
+      "grid": {
+        "seed": [
+          0,
+          1,
+          2
+        ]
+      }
+    },
+    {
+      "name": "F-capture24\u2192WISDM: logsig+xf mlp_logsig @ 200/100 epochs (epoch-justification, cf. A2 @ 2/10)",
+      "enabled": true,
+      "pretrain": {
+        "data_name": "_DA_capture24_256_00",
+        "num_feature": 3,
+        "num_target": 1
+      },
+      "finetune_targets": [
+        {
+          "data_name": "_DA_WISDM_256_00",
+          "num_feature": 3,
+          "num_target": 6
+        }
+      ],
+      "fixed": {
+        "view2": "logsig",
+        "view3": "xf",
+        "encoder_type": "mlp_logsig",
+        "logsig_depth": 2,
+        "logsig_mode": "window",
+        "logsig_window_size": 64,
+        "logsig_normalize": true,
+        "interaction_type": "bilinear",
+        "epochs_pretrain": 200,
+        "epochs_finetune": 100,
+        "batch_size_pretrain": 128,
+        "run_modes": "finetune"
+      },
+      "grid": {
+        "seed": [
+          0,
+          1,
+          2
+        ]
+      }
+    }
+  ]
+}

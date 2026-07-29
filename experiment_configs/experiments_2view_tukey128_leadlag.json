@@ -1,0 +1,213 @@
+{
+  "_comment": "DoE: 2-view mlp_logsig+bilinear, logsig_mode=window_smooth/tukey/window_size=128, on capture24→USC_HAD and capture24→Opportunity (channel_adapt=pca, per A4/B precedent for channel-count mismatches). Three transform arms per dataset pair, each sweeping logsig_lead_lag over [0,8,16,32] (0 doubles as the tukey128 baseline, free via pretrain dedup): (1) lead-lag alone; (2) lead-lag x redundancy_penalty in [0.001,0.01,0.1] (Barlow-Twins cross-view penalty, cf. D2); (3) logsig_normalize=true + lead-lag ('norm+lead-lag'). run_modes=finetune only (freeze/baseline don't depend on the ablated hyperparams, cf. D2). Run with: python scripts/run_experiments.py experiment_configs/experiments_2view_tukey128_leadlag.json --gpus 6,7,8",
+  "experiments": [
+    {
+      "name": "capture24→USC_HAD (2-view mlp_logsig+bilinear, tukey128): lead-lag sweep",
+      "enabled": true,
+      "pretrain": {
+        "data_name": "_DA_capture24_256_00",
+        "num_feature": 3,
+        "num_target": 1
+      },
+      "finetune_targets": [
+        {
+          "data_name": "_DA_USC_HAD_256_00",
+          "num_feature": 6,
+          "num_target": 12,
+          "channel_adapt": "pca"
+        }
+      ],
+      "fixed": {
+        "view2": "logsig",
+        "encoder_type": "mlp_logsig",
+        "logsig_depth": 2,
+        "logsig_mode": "window_smooth",
+        "logsig_smoothing": "tukey",
+        "logsig_window_size": 128,
+        "interaction_type": "bilinear",
+        "epochs_pretrain": 2,
+        "epochs_finetune": 10,
+        "batch_size_pretrain": 128,
+        "run_modes": "finetune"
+      },
+      "grid": {
+        "logsig_lead_lag": [0, 8, 16, 32],
+        "seed": [0, 1, 2, 3, 4]
+      }
+    },
+    {
+      "name": "capture24→USC_HAD (2-view mlp_logsig+bilinear, tukey128): lead-lag x redundancy-penalty sweep",
+      "enabled": true,
+      "pretrain": {
+        "data_name": "_DA_capture24_256_00",
+        "num_feature": 3,
+        "num_target": 1
+      },
+      "finetune_targets": [
+        {
+          "data_name": "_DA_USC_HAD_256_00",
+          "num_feature": 6,
+          "num_target": 12,
+          "channel_adapt": "pca"
+        }
+      ],
+      "fixed": {
+        "view2": "logsig",
+        "encoder_type": "mlp_logsig",
+        "logsig_depth": 2,
+        "logsig_mode": "window_smooth",
+        "logsig_smoothing": "tukey",
+        "logsig_window_size": 128,
+        "interaction_type": "bilinear",
+        "epochs_pretrain": 2,
+        "epochs_finetune": 10,
+        "batch_size_pretrain": 128,
+        "run_modes": "finetune"
+      },
+      "grid": {
+        "logsig_lead_lag": [0, 8, 16, 32],
+        "redundancy_penalty": [0.001, 0.01, 0.1],
+        "seed": [0, 1, 2, 3, 4]
+      }
+    },
+    {
+      "name": "capture24→USC_HAD (2-view mlp_logsig+bilinear, tukey128): norm + lead-lag sweep",
+      "enabled": true,
+      "pretrain": {
+        "data_name": "_DA_capture24_256_00",
+        "num_feature": 3,
+        "num_target": 1
+      },
+      "finetune_targets": [
+        {
+          "data_name": "_DA_USC_HAD_256_00",
+          "num_feature": 6,
+          "num_target": 12,
+          "channel_adapt": "pca"
+        }
+      ],
+      "fixed": {
+        "view2": "logsig",
+        "encoder_type": "mlp_logsig",
+        "logsig_depth": 2,
+        "logsig_mode": "window_smooth",
+        "logsig_smoothing": "tukey",
+        "logsig_window_size": 128,
+        "logsig_normalize": true,
+        "interaction_type": "bilinear",
+        "epochs_pretrain": 2,
+        "epochs_finetune": 10,
+        "batch_size_pretrain": 128,
+        "run_modes": "finetune"
+      },
+      "grid": {
+        "logsig_lead_lag": [0, 8, 16, 32],
+        "seed": [0, 1, 2, 3, 4]
+      }
+    },
+    {
+      "name": "capture24→Opportunity (2-view mlp_logsig+bilinear, tukey128): lead-lag sweep",
+      "enabled": true,
+      "pretrain": {
+        "data_name": "_DA_capture24_256_00",
+        "num_feature": 3,
+        "num_target": 1
+      },
+      "finetune_targets": [
+        {
+          "data_name": "_DA_Opportunity_256_00",
+          "num_feature": 113,
+          "num_target": 18,
+          "channel_adapt": "pca"
+        }
+      ],
+      "fixed": {
+        "view2": "logsig",
+        "encoder_type": "mlp_logsig",
+        "logsig_depth": 2,
+        "logsig_mode": "window_smooth",
+        "logsig_smoothing": "tukey",
+        "logsig_window_size": 128,
+        "interaction_type": "bilinear",
+        "epochs_pretrain": 2,
+        "epochs_finetune": 10,
+        "batch_size_pretrain": 128,
+        "run_modes": "finetune"
+      },
+      "grid": {
+        "logsig_lead_lag": [0, 8, 16, 32],
+        "seed": [0, 1, 2, 3, 4]
+      }
+    },
+    {
+      "name": "capture24→Opportunity (2-view mlp_logsig+bilinear, tukey128): lead-lag x redundancy-penalty sweep",
+      "enabled": true,
+      "pretrain": {
+        "data_name": "_DA_capture24_256_00",
+        "num_feature": 3,
+        "num_target": 1
+      },
+      "finetune_targets": [
+        {
+          "data_name": "_DA_Opportunity_256_00",
+          "num_feature": 113,
+          "num_target": 18,
+          "channel_adapt": "pca"
+        }
+      ],
+      "fixed": {
+        "view2": "logsig",
+        "encoder_type": "mlp_logsig",
+        "logsig_depth": 2,
+        "logsig_mode": "window_smooth",
+        "logsig_smoothing": "tukey",
+        "logsig_window_size": 128,
+        "interaction_type": "bilinear",
+        "epochs_pretrain": 2,
+        "epochs_finetune": 10,
+        "batch_size_pretrain": 128,
+        "run_modes": "finetune"
+      },
+      "grid": {
+        "logsig_lead_lag": [0, 8, 16, 32],
+        "redundancy_penalty": [0.001, 0.01, 0.1],
+        "seed": [0, 1, 2, 3, 4]
+      }
+    },
+    {
+      "name": "capture24→Opportunity (2-view mlp_logsig+bilinear, tukey128): norm + lead-lag sweep",
+      "enabled": true,
+      "pretrain": {
+        "data_name": "_DA_capture24_256_00",
+        "num_feature": 3,
+        "num_target": 1
+      },
+      "finetune_targets": [
+        {
+          "data_name": "_DA_Opportunity_256_00",
+          "num_feature": 113,
+          "num_target": 18,
+          "channel_adapt": "pca"
+        }
+      ],
+      "fixed": {
+        "view2": "logsig",
+        "encoder_type": "mlp_logsig",
+        "logsig_depth": 2,
+        "logsig_mode": "window_smooth",
+        "logsig_smoothing": "tukey",
+        "logsig_window_size": 128,
+        "logsig_normalize": true,
+        "interaction_type": "bilinear",
+        "epochs_pretrain": 2,
+        "epochs_finetune": 10,
+        "batch_size_pretrain": 128,
+        "run_modes": "finetune"
+      },
+      "grid": {
+        "logsig_lead_lag": [0, 8, 16, 32],
+        "seed": [0, 1, 2, 3, 4]
+      }
+    }
+  ]
+}

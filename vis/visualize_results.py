@@ -20,6 +20,8 @@ import numpy as np
 import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
+from matplotlib.lines import Line2D
+from matplotlib.transforms import blended_transform_factory
 from scipy import stats
 
 matplotlib.rcParams['hatch.linewidth'] = 2.0   # default 1.0 is invisible on thin bars
@@ -27,6 +29,23 @@ matplotlib.rcParams['hatch.linewidth'] = 2.0   # default 1.0 is invisible on thi
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
+
+# Comment out any entry here to hide it from all plots.
+DISABLED_WINDOWS = {
+    # 'global',
+    # 'win64',
+    # 'win64_sl1',
+    # 'win64_ll',
+    # 'win64_rp',
+    # 'win64_ll_rp',
+    # 'norm_win64',
+    # 'norm_win64_lag',
+    # 'win128',
+    # 'win128_s7',
+    # 'tukey64',
+    # 'tukey128',
+    # 'tukey128_s7',
+}
 
 VIEW_ORDER = ['v2dx_v3xf', 'v2logsig_v3xf', 'v2dx_v3logsig', 'v2logsig_nview']
 VIEW_LABEL = {
@@ -36,10 +55,18 @@ VIEW_LABEL = {
     'v2logsig_nview': 'logsig\n(2-view)',
 }
 
-WINDOW_ORDER = ['global', 'win64', 'norm_win64', 'norm_win64_lag', 'win128', 'win128_s7', 'tukey64', 'tukey128', 'tukey128_s7']
+_ALL_WINDOW_ORDER = ['global', 'win64', 'win64_sl1', 'win64_ll', 'win64_rp', 'win64_ll_rp',
+                     'win64_norm_ll', 'norm_win64', 'norm_win64_lag', 'win128', 'win128_s7',
+                     'tukey64', 'tukey128', 'tukey128_s7']
+WINDOW_ORDER = [w for w in _ALL_WINDOW_ORDER if w not in DISABLED_WINDOWS]
 WINDOW_LABEL = {
     'global':        'global',
     'win64':         'win 64',
+    'win64_sl1':     'win 64\n(no lv1)',
+    'win64_ll':      'win 64\n+lead-lag',
+    'win64_rp':      'win 64\n+red. pen.',
+    'win64_ll_rp':   'win 64\n+ll+rp',
+    'win64_norm_ll': 'win 64\n+norm+ll',
     'norm_win64':    'norm win 64',
     'norm_win64_lag':'norm win 64\n+lag',
     'win128':        'win 128',
@@ -48,17 +75,92 @@ WINDOW_LABEL = {
     'tukey128':      'tukey 128',
     'tukey128_s7':   'tukey 128\ns7',
 }
-WINDOW_COLOR = {
-    'global':        '#4C72B0',
-    'win64':         '#DD8452',
-    'norm_win64':    '#C8860A',
-    'norm_win64_lag':'#95190C',
-    'win128':        '#55A868',
-    'win128_s7':     '#2CA02C',
-    'tukey64':       '#C44E52',
-    'tukey128':      '#8172B3',
-    'tukey128_s7':   '#6B4C9A',
+_cmap = matplotlib.colormaps['nipy_spectral']
+WINDOW_COLOR = {w: _cmap((i + 0.5) / len(_ALL_WINDOW_ORDER))
+                for i, w in enumerate(_ALL_WINDOW_ORDER)}
+
+# ---------------------------------------------------------------------------
+# Figure 1 vocabulary: major method (marker shape) x adjustment (marker colour)
+# Every window key above factors into exactly one (method, adjustment) pair.
+# ---------------------------------------------------------------------------
+
+MAJOR_METHOD = {
+    'global':         'global',
+    'win64':          'win64',
+    'win64_sl1':      'win64',
+    'win64_ll':       'win64',
+    'win64_rp':       'win64',
+    'win64_ll_rp':    'win64',
+    'win64_norm_ll':  'win64',
+    'norm_win64':     'norm_win64',
+    'norm_win64_lag': 'norm_win64',
+    'win128':         'win128',
+    'win128_s7':      'win128',
+    'tukey64':        'tukey64',
+    'tukey128':       'tukey128',
+    'tukey128_s7':    'tukey128',
 }
+ADJUSTMENT = {
+    'global':         'none',
+    'win64':          'none',
+    'win64_sl1':      'no_lv1',
+    'win64_ll':       'lead_lag',
+    'win64_rp':       'reduced_pen',
+    'win64_ll_rp':    'lead_lag_rp',
+    'win64_norm_ll':  'norm_leadlag',
+    'norm_win64':     'none',
+    'norm_win64_lag': 'lag',
+    'win128':         'none',
+    'win128_s7':      'stride7',
+    'tukey64':        'none',
+    'tukey128':       'none',
+    'tukey128_s7':    'stride7',
+}
+
+METHOD_ORDER = ['global', 'win64', 'norm_win64', 'win128', 'tukey64', 'tukey128']
+METHOD_LABEL = {
+    'global':     'global',
+    'win64':      'win 64',
+    'norm_win64': 'norm win 64',
+    'win128':     'win 128',
+    'tukey64':    'tukey 64',
+    'tukey128':   'tukey 128',
+}
+METHOD_MARKER = {
+    'global':     'o',
+    'win64':      's',
+    'norm_win64': '^',
+    'win128':     'D',
+    'tukey64':    'v',
+    'tukey128':   'P',
+}
+
+# Order (and therefore color index) must match visualize_capture24.py's
+# ADJUSTMENT_ORDER exactly, so the same adjustment always gets the same color
+# across both files — 'noise' has no data here (win64_lsn0.1 isn't part of
+# this file's window set) but is kept as a placeholder to preserve alignment.
+ADJUSTMENT_ORDER = ['none', 'no_lv1', 'lead_lag', 'reduced_pen', 'lead_lag_rp',
+                    'norm_leadlag', 'noise', 'lag', 'stride7']
+ADJUSTMENT_LABEL = {
+    'none':         'none',
+    'no_lv1':       'no lv1',
+    'lead_lag':     'lead-lag',
+    'reduced_pen':  'red. pen.',
+    'lead_lag_rp':  'lead-lag + red. pen.',
+    'norm_leadlag': 'norm + lead-lag',
+    'noise':        'noise',
+    'lag':          'lag',
+    'stride7':      'stride 7',
+}
+_tab10 = matplotlib.colormaps['tab10'].colors
+ADJUSTMENT_COLOR = {adj: _tab10[i % len(_tab10)] for i, adj in enumerate(ADJUSTMENT_ORDER)}
+
+# channel_adapt: overlay drawn on top of the base (method, adjustment) marker, so the
+# channel-adapt family still reads as "the same win64 point, with a mark on it".
+CHADAPT_ORDER = ['none', 'drop', 'pca', 'copy']
+CHADAPT_OVERLAY = {'none': None, 'drop': '.', 'pca': 'x', 'copy': '+'}
+CHADAPT_LABEL = {'none': 'none (no mark)', 'drop': 'drop (• overlay)',
+                 'pca': 'pca (× overlay)', 'copy': 'copy (+ overlay)'}
 
 # Three encoder variants:
 #   transformer       — default, mean pool over logsig time dim (auto)
@@ -66,13 +168,6 @@ WINDOW_COLOR = {
 #   mlp_logsig        — MLP branch, last-token pool (auto for stream)
 ENCODERS  = ['transformer', 'transformer_plast', 'mlp_logsig',
              'mlp_logsig_bilinear', 'transformer_bilinear']
-ENC_HATCH = {
-    'transformer':          '',
-    'transformer_plast':    '\\' * 6,
-    'mlp_logsig':           '/' * 6,
-    'mlp_logsig_bilinear':  'xx',
-    'transformer_bilinear': 'oo',
-}
 ENC_LABEL = {
     'transformer':          'Transformer (mean pool)',
     'transformer_plast':    'Transformer (last pool)',
@@ -80,78 +175,138 @@ ENC_LABEL = {
     'mlp_logsig_bilinear':  'MLP-LogSig bilinear',
     'transformer_bilinear': 'Transformer bilinear',
 }
+# Short form used for the close-to-axis "model type" tick row in Figure 1.
+ENC_AXIS_LABEL = {
+    'transformer':          'mean pool',
+    'transformer_plast':    'last pool',
+    'mlp_logsig':           'MLP-LogSig',
+    'mlp_logsig_bilinear':  'MLP-LogSig+bil',
+    'transformer_bilinear': 'Transformer+bil',
+    'simmtm':               'SimMTM',
+}
 
 # ---------------------------------------------------------------------------
-# Bar geometry
+# Point geometry
+#
+# Within a view group, points are organised model-type-major: each encoder/
+# pooling variant ("model type") gets its own x-slot (in ENCODERS order), and
+# within a slot every (window) point gets its own x-position, clustered by
+# major method. The one exception is win64_norm_ll under mlp_logsig_bilinear,
+# which expands into 3 tightly-spaced channel_adapt sub-positions (the
+# channel-adapt trial suite varies channel_adapt at fixed window config).
 # ---------------------------------------------------------------------------
 
-BAR_W     = 0.048   # width of each individual bar
-INNER_GAP = 0.008   # gap between bars within a sub-group
-WIN_GAP   = 0.025   # gap between window sub-groups
-VIEW_SEP  = 1.20    # centre-to-centre distance between view groups
+POINT_PITCH          = 0.080   # centre-to-centre spacing between adjacent points (same method)
+BIL_POINT_PITCH      = 0.108   # wider spacing within mlp_logsig_bilinear
+COMPACT_POINT_PITCH  = 0.018   # tight spacing for transformer (mean-pool) slot — halves its tile
+COMPACT_METHOD_GAP   = 0.050   # compressed inter-method gap within the transformer slot
+METHOD_GAP      = 0.100   # extra gap injected when the major method changes
+SLOT_GAP        = 0.25    # gap between model-type slots within a view group
+CHADAPT_PITCH   = 0.044   # tight centre-to-centre spacing for channel_adapt sub-positions
+MARKER_SIZE     = 6.0
 
-SUB_W_2 = 2 * BAR_W + INNER_GAP        # 2-bar sub-group (windowed, no bilinear)
-SUB_W_3 = 3 * BAR_W + 2 * INNER_GAP   # 3-bar sub-group (global or bilinear windowed)
-_N_WIN = len(WINDOW_ORDER)             # total number of window sub-groups
-# win64, win128, tukey128 have bilinear data → 3-bar; others → 2-bar
-_BIL_WIN_SET = {'win64', 'norm_win64', 'win128', 'tukey128'}
-LOGSIG_SPAN = (
-    SUB_W_3                                                           # global
-    + sum(SUB_W_3 if w in _BIL_WIN_SET else SUB_W_2
-          for w in WINDOW_ORDER[1:])
-    + (_N_WIN - 1) * WIN_GAP
-)
+# win64, win128, tukey128 (+ the channel-adapt win64_norm_ll combo) have bilinear data.
+_BIL_WIN_SET = {'win64', 'win64_sl1', 'win64_ll', 'win64_rp', 'win64_ll_rp',
+                'win64_norm_ll', 'norm_win64', 'win128', 'tukey128'}
 
 
-def _view_bar_specs(view_key):
-    """Return [(window, encoder, rel_x), ...] relative to the group centre."""
-    if view_key == 'v2dx_v3xf':
-        # 2 bars: transformer (standard) | transformer (bilinear)
-        _hw = BAR_W / 2 + INNER_GAP / 2
-        return [
-            ('global', 'transformer',          -_hw),
-            ('global', 'transformer_bilinear',  +_hw),
-        ]
+def _model_types_for_window(win):
+    if win == 'global':
+        return ['transformer', 'transformer_plast', 'mlp_logsig']
+    elif win in _BIL_WIN_SET:
+        return ['transformer', 'mlp_logsig_bilinear', 'transformer_bilinear']
+    else:
+        return ['transformer', 'mlp_logsig']
 
-    specs = []
-    x = -LOGSIG_SPAN / 2
-    for i, win in enumerate(WINDOW_ORDER):
-        if i > 0:
-            x += WIN_GAP
-        is_bil = win in _BIL_WIN_SET
-        sw = SUB_W_3 if (win == 'global' or is_bil) else SUB_W_2
-        xc = x + sw / 2
 
-        if win == 'global':
-            # 3 bars: transformer (mean) | transformer_plast (last) | mlp_logsig
-            specs.append((win, 'transformer',       xc - BAR_W - INNER_GAP))
-            specs.append((win, 'transformer_plast', xc))
-            specs.append((win, 'mlp_logsig',        xc + BAR_W + INNER_GAP))
-        elif is_bil:
-            # 3 bars: transformer | mlp_logsig | mlp_logsig_bilinear
-            specs.append((win, 'transformer',          xc - BAR_W - INNER_GAP))
-            specs.append((win, 'mlp_logsig',           xc))
-            specs.append((win, 'mlp_logsig_bilinear',  xc + BAR_W + INNER_GAP))
+def _slot_points(model_type, windows):
+    """Lay out one x-position per (window, channel_adapt) item for a single
+    model-type slot. Returns ([(window, channel_adapt, rel_x), ...], slot_width)
+    with rel_x centred on the slot (0 = slot centre)."""
+    if model_type == 'mlp_logsig_bilinear':
+        pitch, meth_gap = BIL_POINT_PITCH, METHOD_GAP
+    elif model_type == 'transformer':
+        pitch, meth_gap = COMPACT_POINT_PITCH, COMPACT_METHOD_GAP
+    else:
+        pitch, meth_gap = POINT_PITCH, METHOD_GAP
+
+    items = []
+    for w in windows:
+        if w == 'win64_norm_ll' and model_type == 'mlp_logsig_bilinear':
+            items.extend((w, ca) for ca in CHADAPT_ORDER)
         else:
-            # 2 bars: transformer | mlp_logsig
-            specs.append((win, 'transformer', xc - BAR_W / 2 - INNER_GAP / 2))
-            specs.append((win, 'mlp_logsig',  xc + BAR_W / 2 + INNER_GAP / 2))
+            items.append((w, 'none'))
 
-        x += sw
+    xs, x = [], 0.0
+    for i, (w, _ca) in enumerate(items):
+        if i > 0:
+            prev_w = items[i - 1][0]
+            if w == prev_w:
+                x += CHADAPT_PITCH
+            elif MAJOR_METHOD[w] == MAJOR_METHOD[prev_w]:
+                x += pitch
+            else:
+                x += meth_gap
+        xs.append(x)
 
-    return specs
+    width = xs[-1] if xs else 0.0
+    centre = width / 2
+    return [(w, ca, xv - centre) for (w, ca), xv in zip(items, xs)], width
 
 
-_BAR_SPECS = {v: _view_bar_specs(v) for v in VIEW_ORDER}
+def _view_point_specs(view_key):
+    """Return (specs, slot_centres, total_width) for one view group.
+    specs        = [(window, model_type, channel_adapt, rel_x), ...] rel. to view centre
+    slot_centres = [(model_type, rel_x_centre, half_width), ...] for the near-axis tick
+                   row and the slot-boundary separators (half_width is the point-cluster
+                   half-width, not including the surrounding SLOT_GAP padding)
+    """
+    if view_key == 'v2dx_v3xf':
+        per_model = [('transformer', [('global', 'none', 0.0)], 0.0),
+                     ('transformer_bilinear', [('global', 'none', 0.0)], 0.0),
+                     ('simmtm', [('simmtm', 'none', 0.0)], 0.0)]
+    else:
+        per_model_windows = {enc: [] for enc in ENCODERS}
+        for win in WINDOW_ORDER:
+            for enc in _model_types_for_window(win):
+                per_model_windows[enc].append(win)
+        per_model = []
+        for enc in ENCODERS:
+            windows = per_model_windows[enc]
+            if not windows:
+                continue
+            pts, width = _slot_points(enc, windows)
+            per_model.append((enc, pts, width))
+
+    n_gaps = max(len(per_model) - 1, 0)
+    total = sum(w for _, _, w in per_model) + SLOT_GAP * n_gaps
+    specs, slot_centres = [], []
+    x = -total / 2
+    for i, (enc, pts, width) in enumerate(per_model):
+        slot_c = x + width / 2
+        for w, ca, rel in pts:
+            specs.append((w, enc, ca, slot_c + rel))
+        slot_centres.append((enc, slot_c, width / 2))
+        x += width + (SLOT_GAP if i < n_gaps else 0)
+
+    return specs, slot_centres, total
+
+
+_VIEW_SPECS = {v: _view_point_specs(v) for v in VIEW_ORDER}
+_MAX_VIEW_WIDTH = max(total for _, _, total in _VIEW_SPECS.values())
+VIEW_SEP = _MAX_VIEW_WIDTH + 0.45   # centre-to-centre distance between view groups
 
 # ---------------------------------------------------------------------------
 # Parsing
 # ---------------------------------------------------------------------------
 
-def parse_finetune_row(name: str):
+def parse_finetune_row(name: str, expected_pretrain: str = None):
     """
-    Returns (view_key, window, encoder) for finetune rows, else None.
-    Skips probe rows, non-finetune suffixes, cross-time and view-embed variants.
+    Returns (view_key, window, encoder, channel_adapt) for finetune rows, else None.
+    Skips probe rows, non-finetune suffixes, cross-time and view-embed variants, and
+    (when expected_pretrain is given) rows pretrained on a different dataset — the
+    same TSV can hold runs pretrained on different source datasets (e.g. HARTH and
+    capture24 both finetune onto HAR70plus), and they must not be conflated.
     Bilinear variants are included (mlp_logsig_bilinear / transformer_bilinear).
     """
     if not name or not name.endswith('_finetune') or name.startswith('probe_'):
@@ -159,6 +314,11 @@ def parse_finetune_row(name: str):
     # Cross-time and view-embed interaction variants belong to a separate plot.
     if any(m in name for m in ('_ilcrosstime_', '_ilviewembed_')):
         return None
+
+    if expected_pretrain is not None:
+        pt = re.search(r'_pt-(.+?)_v2', name)
+        if not pt or pt.group(1) != expected_pretrain:
+            return None
 
     is_bilinear = '_ilbilinear_' in name
     # Check mlp_logsig before plast (plast is transformer-only)
@@ -171,22 +331,85 @@ def parse_finetune_row(name: str):
     else:
         encoder = 'transformer'
 
-    m = re.search(r'(v2[a-z]+_(?:v3[a-z]+|nview))_ep', name)
-    if not m or m.group(1) not in VIEW_LABEL:
+    m = re.search(r'(v2[a-z]+(?:_(?:v3[a-z]+|nview))?)_ep', name)
+    if not m:
         return None
     view_key = m.group(1)
+    # bare 2-view tag (v2logsig) → canonical key (v2logsig_nview)
+    if '_v3' not in view_key and not view_key.endswith('_nview'):
+        view_key = view_key + '_nview'
+    if view_key not in VIEW_LABEL:
+        return None
 
-    window = 'global'
+    has_lead_lag = re.search(r'_ll\d+', name) is not None
     if '_win64_norm' in name:
-        window = 'norm_win64_lag' if '_lag' in name else 'norm_win64'
+        # normalised win64, optionally combined with lead-lag (channel-adapt trials)
+        # or the (separate, older) logsig_lag mechanism.
+        if has_lead_lag:
+            window = 'win64_norm_ll'
+        elif '_lag' in name:
+            window = 'norm_win64_lag'
+        else:
+            window = 'norm_win64'
     else:
+        window = 'global'
         for w in ('win128_s7', 'tukey128_s7', 'win64', 'win128', 'tukey64', 'tukey128'):
             if f'_{w}_' in name or f'_{w}.' in name:
                 window = w
                 break
+        if '_sl1' in name:
+            window = window + '_sl1'
+        if has_lead_lag:
+            window = window + '_ll'
+        if re.search(r'_rp[\d.]+', name):
+            window = window + '_rp'
 
-    return view_key, window, encoder
+    if window not in MAJOR_METHOD:
+        return None
 
+    ca_match = re.search(r'_cadrop\d*|_capca\d*|_caexpand\d*', name)
+    if ca_match:
+        g = ca_match.group(0)
+        channel_adapt = 'drop' if 'cadrop' in g else ('pca' if 'capca' in g else 'copy')
+    else:
+        channel_adapt = 'none'
+
+    return view_key, window, encoder, channel_adapt
+
+
+# ---------------------------------------------------------------------------
+# SimMTM comparison baseline
+# ---------------------------------------------------------------------------
+
+SIMMTM_TSV = 'SimMTM/SimMTM_Classification/results/simmtm_results.tsv'
+SIMMTM_MARKER = '*'
+SIMMTM_COLOR  = '#222222'
+SIMMTM_SIZE   = MARKER_SIZE * 0.8
+
+
+def read_simmtm_tsv(path: str):
+    """Return dict (pretrain_dataset, target_dataset) → list[float] (accuracy)."""
+    scores = {}
+    try:
+        with open(path) as f:
+            for line in f:
+                line = line.rstrip('\n')
+                if not line or line.startswith('#') or line.startswith('pretrain'):
+                    continue
+                parts = line.split('\t')
+                if len(parts) < 6:
+                    continue
+                try:
+                    acc = float(parts[5])
+                except ValueError:
+                    continue
+                scores.setdefault((parts[0], parts[1]), []).append(acc)
+    except FileNotFoundError:
+        pass
+    return scores
+
+
+_simmtm_scores = read_simmtm_tsv(SIMMTM_TSV)
 
 # ---------------------------------------------------------------------------
 # Interaction-type constants
@@ -256,9 +479,10 @@ def read_interaction_tsv(path: str):
     return scores
 
 
-def read_tsv(*paths: str):
-    """Return dict (view_key, window, encoder) → list[float] for finetune rows.
-    Accepts multiple paths; results are merged (lists concatenated)."""
+def read_tsv(*paths: str, expected_pretrain: str = None):
+    """Return dict (view_key, window, encoder, channel_adapt) → list[float] for
+    finetune rows. Accepts multiple paths; results are merged (lists concatenated).
+    expected_pretrain, if given, drops rows pretrained on any other dataset."""
     scores = {}
     for path in paths:
         try:
@@ -270,7 +494,7 @@ def read_tsv(*paths: str):
                     parts = line.split('\t')
                     if len(parts) < 2:
                         continue
-                    parsed = parse_finetune_row(parts[0])
+                    parsed = parse_finetune_row(parts[0], expected_pretrain=expected_pretrain)
                     if parsed is None:
                         continue
                     try:
@@ -354,76 +578,130 @@ def read_bilinear_tsv(*paths: str):
 
 epilepsy_scores = read_tsv(
     'out_finetune/_DA_Epilepsy_256_00/final_test_metric_summary.tsv',
-    'out_finetune_pre_canada_old/_DA_Epilepsy_256_00/final_test_metric_summary.tsv')
+    'out_finetune_pre_canada_old/_DA_Epilepsy_256_00/final_test_metric_summary.tsv',
+    expected_pretrain='_DA_SleepEEG_256_00')
 har_scores = read_tsv(
     'out_finetune/_DA_HAR70plus_256_00/final_test_metric_summary.tsv',
-    'out_finetune_pre_canada_old/_DA_HAR70plus_256_00/final_test_metric_summary.tsv')
+    'out_finetune_pre_canada_old/_DA_HAR70plus_256_00/final_test_metric_summary.tsv',
+    expected_pretrain='_DA_HARTH_256_00')
 
 panels = [
-    ('Epilepsy  (SleepEEG pretrain)', epilepsy_scores),
-    ('HAR70plus  (HARTH pretrain)',   har_scores),
+    ('Epilepsy  (SleepEEG pretrain)', epilepsy_scores,
+     _simmtm_scores.get(('SleepEEG', 'Epilepsy'), [])),
+    ('HAR70plus  (HARTH pretrain)',   har_scores,
+     _simmtm_scores.get(('HARTH', 'HAR70plus'), [])),
 ]
 
 # ---------------------------------------------------------------------------
 # Plot
 # ---------------------------------------------------------------------------
 
-fig, axes = plt.subplots(1, 2, figsize=(22, 6.5), sharey=False)
+fig, axes = plt.subplots(1, 2, figsize=(24, 7.5), sharey=False)
 fig.suptitle('Finetune accuracy — view combinations, logsig variants, encoders',
              fontsize=13, fontweight='bold', y=1.01)
 
-view_centres = np.arange(len(VIEW_ORDER)) * VIEW_SEP
+# dx+xf has only 3 single-point slots; give it a compact allocation and let
+# the logsig groups fill the freed space (logsig centres shift left).
+_dx_content  = _VIEW_SPECS[VIEW_ORDER[0]][2]   # = 2 * SLOT_GAP ≈ 0.50
+_DX_HALF     = _dx_content / 2 + 0.30         # content half + small margin each side
+_group_bounds = ([-_DX_HALF, _DX_HALF] +
+                 [_DX_HALF + k * VIEW_SEP for k in range(1, len(VIEW_ORDER) + 1)])
+view_centres  = [(_group_bounds[i] + _group_bounds[i + 1]) / 2
+                 for i in range(len(VIEW_ORDER))]
 
-for ax, (title, scores) in zip(axes, panels):
+# Near-axis (model type) ticks, far-axis (view group) label/bracket positions, the
+# light separators between model-type slots, and the slot background tiles are
+# purely structural — identical for both panels — so build them once.
+_slot_ticks, _slot_labels = [], []
+_slot_tiles  = []      # (lo, hi) per slot, abutting neighbours — for zebra shading
+_slot_separators = []  # x-positions of the gap midpoint between adjacent slots
+_group_ranges = []  # (view_key, xc, half_width)
+for vi, view_key in enumerate(VIEW_ORDER):
+    xc = view_centres[vi]
+    _specs, _slot_centres, _total = _VIEW_SPECS[view_key]
+    _group_lo, _group_hi = _group_bounds[vi], _group_bounds[vi + 1]
+    _seps_in_group = [xc + ((c0 + h0) + (c1 - h1)) / 2
+                       for (_, c0, h0), (_, c1, h1) in zip(_slot_centres, _slot_centres[1:])]
+    _edges = [_group_lo] + _seps_in_group + [_group_hi]
+    for i, (enc, slot_c, slot_half) in enumerate(_slot_centres):
+        _slot_ticks.append(xc + slot_c)
+        _slot_labels.append(ENC_AXIS_LABEL[enc])
+        _slot_tiles.append((_edges[i], _edges[i + 1]))
+    _slot_separators.extend(_seps_in_group)
+    _group_ranges.append((view_key, xc, _total / 2))
 
-    ref_vals  = scores.get(('v2dx_v3xf', 'global', 'transformer'), [])
+for ax, (title, scores, simmtm_vals) in zip(axes, panels):
+
+    ref_vals  = scores.get(('v2dx_v3xf', 'global', 'transformer', 'none'), [])
     ref_score = np.mean(ref_vals) if ref_vals else None
+
+    # alternating zebra shading per model-type slot (greyscale)
+    for si, (lo, hi) in enumerate(_slot_tiles):
+        if si % 2 == 1:
+            ax.axvspan(lo, hi, color='#f0f0f0', zorder=0, linewidth=0)
 
     for vi, view_key in enumerate(VIEW_ORDER):
         xc = view_centres[vi]
-        specs = _BAR_SPECS[view_key]
+        specs, _, _ = _VIEW_SPECS[view_key]
 
-        for win, enc, rel_x in specs:
-            key  = (view_key, win, enc)
+        for win, enc, ca, rel_x in specs:
+            x = xc + rel_x
+
+            if enc == 'simmtm':
+                if not simmtm_vals:
+                    continue
+                score = np.mean(simmtm_vals)
+                yerr = None
+                if len(simmtm_vals) > 1:
+                    n    = len(simmtm_vals)
+                    std  = np.std(simmtm_vals, ddof=1)
+                    ci95 = stats.t.ppf(0.975, df=n - 1) * std / np.sqrt(n)
+                    yerr = [[min(ci95, score)], [min(ci95, 1.0 - score)]]
+                ax.errorbar(x, score, yerr=yerr,
+                            fmt=SIMMTM_MARKER, markersize=SIMMTM_SIZE,
+                            markerfacecolor=SIMMTM_COLOR, markeredgecolor=SIMMTM_COLOR,
+                            ecolor=SIMMTM_COLOR, elinewidth=1.3, capsize=2.5, zorder=5)
+                continue
+
+            key  = (view_key, win, enc, ca)
             vals = scores.get(key, [])
             if not vals:
                 continue
-            score = np.mean(vals)
+            score  = np.mean(vals)
+            method = MAJOR_METHOD[win]
+            adj    = ADJUSTMENT[win]
 
-            color = WINDOW_COLOR[win]
-            hatch = ENC_HATCH[enc]
-            ax.bar(xc + rel_x, score,
-                   width=BAR_W - 0.005,
-                   color=color,
-                   hatch=hatch,
-                   edgecolor='white' if hatch == '' else '#333',
-                   linewidth=0.5,
-                   zorder=3)
+            yerr = None
             if len(vals) > 1:
-                n = len(vals)
-                std = np.std(vals, ddof=1)
+                n    = len(vals)
+                std  = np.std(vals, ddof=1)
                 ci95 = stats.t.ppf(0.975, df=n - 1) * std / np.sqrt(n)
-                min_val, max_val = min(vals), max(vals)
-                # min/max range (thin grey whiskers)
-                ax.errorbar(xc + rel_x, score,
-                            yerr=[[score - min_val], [max_val - score]],
-                            fmt='none',
-                            ecolor='#999',
-                            elinewidth=0.6,
-                            capsize=3,
-                            zorder=4)
-                # 95% CI (thicker black bar on top) — clipped to [0, 1]
-                ax.errorbar(xc + rel_x, score,
-                            yerr=[[min(ci95, score)], [min(ci95, 1.0 - score)]],
-                            fmt='none',
-                            ecolor='#111',
-                            elinewidth=1.6,
-                            capsize=2,
-                            zorder=5)
+                yerr = [[min(ci95, score)], [min(ci95, 1.0 - score)]]
+
+            ax.errorbar(x, score, yerr=yerr,
+                        fmt=METHOD_MARKER[method],
+                        markersize=MARKER_SIZE,
+                        markerfacecolor=ADJUSTMENT_COLOR[adj],
+                        markeredgecolor='#333',
+                        markeredgewidth=0.6,
+                        ecolor='#333',
+                        elinewidth=1.3,
+                        capsize=2.5,
+                        zorder=5)
+
+            overlay = CHADAPT_OVERLAY[ca]
+            if overlay is not None:
+                ax.plot(x, score, marker=overlay, color='black',
+                        markersize=4.5, markeredgewidth=1.4, zorder=6)
 
         if vi < len(VIEW_ORDER) - 1:
-            ax.axvline(xc + VIEW_SEP / 2, color='#cccccc',
-                       linewidth=0.8, linestyle='--', zorder=1)
+            ax.axvline(_group_bounds[vi + 1], color='#999999',
+                       linewidth=1.2, linestyle='-', zorder=1)
+
+    # light separators between model-type slots, so each architecture's point
+    # cluster reads as its own column rather than bleeding into its neighbour
+    for sep_x in _slot_separators:
+        ax.axvline(sep_x, color='#cccccc', linewidth=0.7, linestyle=':', zorder=1)
 
     if ref_score is not None:
         ax.axhline(ref_score, color='#222', linewidth=1.2,
@@ -434,8 +712,25 @@ for ax, (title, scores) in zip(axes, panels):
                 fontsize=7.5, va='bottom', ha='right', color='#222')
 
     ax.set_title(title, fontsize=10, pad=8)
-    ax.set_xticks(view_centres)
-    ax.set_xticklabels([VIEW_LABEL[v] for v in VIEW_ORDER], fontsize=9)
+
+    # Near-axis row: model type, at every slot centre.
+    ax.set_xticks(_slot_ticks)
+    ax.set_xticklabels(_slot_labels, fontsize=7.5, rotation=50, ha='right')
+    ax.tick_params(axis='x', pad=2)
+
+    trans = blended_transform_factory(ax.transData, ax.transAxes)
+
+    # Far-axis row: view-combo group label + bracket, in axes-fraction y so it
+    # tracks the data x-range but sits at a fixed vertical offset.
+    bracket_y, label_y = -0.30, -0.335
+    for view_key, gxc, ghalf in _group_ranges:
+        ax.plot([gxc - ghalf, gxc + ghalf], [bracket_y, bracket_y],
+                transform=trans, color='#555', linewidth=1.0,
+                clip_on=False, zorder=2)
+        ax.annotate(VIEW_LABEL[view_key], xy=(gxc, label_y), xycoords=trans,
+                    ha='center', va='top', fontsize=8.5, color='#222',
+                    annotation_clip=False)
+
     ax.set_ylabel('Accuracy', fontsize=9)
 
     all_scores = [np.mean(v) for v in scores.values() if v]
@@ -444,41 +739,60 @@ for ax, (title, scores) in zip(axes, panels):
     ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda y, _: f'{y:.2f}'))
     ax.grid(axis='y', linestyle='--', alpha=0.4, zorder=0)
     ax.spines[['top', 'right']].set_visible(False)
-    half = LOGSIG_SPAN / 2 + 0.12
-    ax.set_xlim(-half, (len(VIEW_ORDER) - 1) * VIEW_SEP + half)
+    ax.set_xlim(_group_bounds[0] - 0.1, _group_bounds[-1] + 0.1)
 
 # ---------------------------------------------------------------------------
 # Legend
 # ---------------------------------------------------------------------------
 
-window_patches = [
-    mpatches.Patch(facecolor=WINDOW_COLOR[w], edgecolor='white',
-                   label=WINDOW_LABEL[w])
-    for w in WINDOW_ORDER
+method_handles = [
+    Line2D([0], [0], marker=METHOD_MARKER[m], linestyle='none',
+           markerfacecolor='#888', markeredgecolor='#333', markersize=8,
+           label=METHOD_LABEL[m])
+    for m in METHOD_ORDER
+] + [
+    Line2D([0], [0], marker=SIMMTM_MARKER, linestyle='none',
+           markerfacecolor=SIMMTM_COLOR, markeredgecolor=SIMMTM_COLOR,
+           markersize=10, label='SimMTM'),
 ]
-enc_patches = [
-    mpatches.Patch(facecolor='#888', hatch=ENC_HATCH[e],
-                   edgecolor='#333', label=ENC_LABEL[e])
-    for e in ['transformer', 'transformer_plast', 'mlp_logsig', 'mlp_logsig_bilinear',
-              'transformer_bilinear']
+adjustment_handles = [
+    Line2D([0], [0], marker='o', linestyle='none',
+           markerfacecolor=ADJUSTMENT_COLOR[a], markeredgecolor='#333', markersize=8,
+           label=ADJUSTMENT_LABEL[a])
+    for a in ADJUSTMENT_ORDER
+]
+chadapt_handles = [
+    Line2D([0], [0], marker='o', linestyle='none', markerfacecolor='#ccc',
+           markeredgecolor='#333', markersize=7, label=CHADAPT_LABEL['none']),
+    Line2D([0], [0], marker='.', linestyle='none', markerfacecolor='black',
+           markeredgecolor='black', markersize=11, label=CHADAPT_LABEL['drop']),
+    Line2D([0], [0], marker='x', linestyle='none', markerfacecolor='black',
+           markeredgecolor='black', markersize=7, label=CHADAPT_LABEL['pca']),
+    Line2D([0], [0], marker='+', linestyle='none', markerfacecolor='black',
+           markeredgecolor='black', markersize=7, markeredgewidth=1.4, label=CHADAPT_LABEL['copy']),
 ]
 
-leg1 = fig.legend(handles=window_patches,
-                  loc='lower center', bbox_to_anchor=(0.28, -0.07),
-                  ncol=5, fontsize=8.5, frameon=False,
-                  title='Logsig window', title_fontsize=9)
-leg2 = fig.legend(handles=enc_patches,
-                  loc='lower center', bbox_to_anchor=(0.76, -0.07),
-                  ncol=3, fontsize=8.5, frameon=False,
-                  title='Encoder / pooling', title_fontsize=9)
+leg1 = fig.legend(handles=method_handles,
+                  loc='lower center', bbox_to_anchor=(0.18, -0.14),
+                  ncol=4, fontsize=8.5, frameon=False,
+                  title='Major method / comparison', title_fontsize=9)
+leg2 = fig.legend(handles=adjustment_handles,
+                  loc='lower center', bbox_to_anchor=(0.58, -0.14),
+                  ncol=4, fontsize=8.5, frameon=False,
+                  title='Adjustment', title_fontsize=9)
+leg3 = fig.legend(handles=chadapt_handles,
+                  loc='lower center', bbox_to_anchor=(0.92, -0.14),
+                  ncol=1, fontsize=8.5, frameon=False,
+                  title='Channel adapt', title_fontsize=9)
 fig.add_artist(leg1)
+fig.add_artist(leg2)
 
 plt.tight_layout()
 os.makedirs('plots', exist_ok=True)
 plt.savefig('plots/finetune_results.pdf', bbox_inches='tight')
 plt.savefig('plots/finetune_results.png', dpi=150, bbox_inches='tight')
 print('Saved: plots/finetune_results.pdf  plots/finetune_results.png')
-plt.show()
+#plt.show()
 
 # ---------------------------------------------------------------------------
 # Figure 2: Interaction-type comparison (dx+xf, ep2 vs ep200)

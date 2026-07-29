@@ -67,6 +67,11 @@ def _logsig_suffix(args) -> str:
     lag = getattr(args, 'logsig_lag', 0)
     if lag > 0:
         base += f'_lag{lag}'
+    if getattr(args, 'logsig_skip_level1', False):
+        base += '_sl1'
+    ll = getattr(args, 'logsig_lead_lag', 0)
+    if ll > 0:
+        base += f'_ll{ll}'
     return base
 
 
@@ -83,11 +88,13 @@ def make_run_tag(args, views: tuple, data_name: str) -> str:
     lsig_suffix = _logsig_suffix(args)
     il_suffix   = ('' if getattr(args, 'interaction_type', 'attention') == 'attention'
                    else f'_il{args.interaction_type.replace("_", "")}')
+    rp = getattr(args, 'redundancy_penalty', 0.0)
+    rp_suffix = f'_rp{rp}' if rp > 0.0 else ''
     if len(views) >= 3:
         view_part = f'_v2{views[1]}_v3{views[2]}'
     else:
         view_part = f'_v2{views[1]}'
-    return f'{data_name}{view_part}_ep{args.epochs_pretrain}_{args.seed}{enc_suffix}{lsig_suffix}{il_suffix}'
+    return f'{data_name}{view_part}_ep{args.epochs_pretrain}_{args.seed}{enc_suffix}{lsig_suffix}{il_suffix}{rp_suffix}'
 
 
 def write_pretrain_summary_row(summary_path: str, run_name: str,
@@ -118,6 +125,8 @@ def log_run_config(args, phase: str, views: tuple, output_file: str,
     record = {
         'timestamp': datetime.datetime.now().isoformat(),
         'phase': phase,
+        'seed': getattr(args, 'seed', None),
+        'data_name': getattr(args, 'data_name', None),
         'views': list(views),
         'output_file': output_file,
         'config': vars(args),

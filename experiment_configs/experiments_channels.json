@@ -1,0 +1,99 @@
+{
+  "_comment": "Channel-adaptation (--channel_adapt) test suite. Run with: python scripts/run_experiments.py experiments_channels.json. All three pairs share one fixed config: mlp_logsig encoder, bilinear interaction, logsig(window,64)+lead-lag(8)+normalize view2, xf view3. Each pair's finetune_targets compare channel_adapt none/drop/pca against the same pretrain checkpoint (channel_adapt only affects finetune_targets, never pretrain, so each pair trains exactly one pretrain checkpoint per seed and reuses it for all three channel_adapt variants).",
+
+  "experiments": [
+    {
+      "name": "HARTH→HAR70plus: channel_adapt sanity check (6=6, no mismatch — drop/pca must be no-ops)",
+      "pretrain": {
+        "data_name": "_DA_HARTH_256_00",
+        "num_feature": 6,
+        "num_target": 12
+      },
+      "finetune_targets": [
+        {"data_name": "_DA_HAR70plus_256_00", "num_feature": 6, "num_target": 7, "channel_adapt": "none"},
+        {"data_name": "_DA_HAR70plus_256_00", "num_feature": 6, "num_target": 7, "channel_adapt": "drop"},
+        {"data_name": "_DA_HAR70plus_256_00", "num_feature": 6, "num_target": 7, "channel_adapt": "pca"}
+      ],
+      "fixed": {
+        "view2": "logsig",
+        "view3": "xf",
+        "encoder_type": "mlp_logsig",
+        "logsig_depth": 2,
+        "logsig_mode": "window",
+        "logsig_window_size": 64,
+        "logsig_lead_lag": 8,
+        "logsig_normalize": true,
+        "interaction_type": "bilinear",
+        "epochs_pretrain": 2,
+        "epochs_finetune": 10,
+        "batch_size_pretrain": 128
+      },
+      "grid": {
+        "seed": [0, 1, 2, 3, 4]
+      }
+    },
+
+    {
+      "name": "capture24→WISDM: channel_adapt sanity check (3=3, no mismatch — drop/pca must be no-ops)",
+      "pretrain": {
+        "data_name": "_DA_capture24_256_00",
+        "num_feature": 3,
+        "num_target": 1
+      },
+      "finetune_targets": [
+        {"data_name": "_DA_WISDM_256_00", "num_feature": 3, "num_target": 6, "channel_adapt": "none"},
+        {"data_name": "_DA_WISDM_256_00", "num_feature": 3, "num_target": 6, "channel_adapt": "drop"},
+        {"data_name": "_DA_WISDM_256_00", "num_feature": 3, "num_target": 6, "channel_adapt": "pca"}
+      ],
+      "fixed": {
+        "view2": "logsig",
+        "view3": "xf",
+        "encoder_type": "mlp_logsig",
+        "logsig_depth": 2,
+        "logsig_mode": "window",
+        "logsig_window_size": 64,
+        "logsig_lead_lag": 8,
+        "logsig_normalize": true,
+        "interaction_type": "bilinear",
+        "epochs_pretrain": 2,
+        "epochs_finetune": 10,
+        "batch_size_pretrain": 128
+      },
+      "grid": {
+        "seed": [0, 1, 2, 3, 4]
+      }
+    },
+
+    {
+      "name": "capture24→HAR70plus: channel_adapt comparison (3→6 mismatch — drop=wrist→back match, pca=auto PCA-3)",
+      "pretrain": {
+        "data_name": "_DA_capture24_256_00",
+        "num_feature": 3,
+        "num_target": 1
+      },
+      "finetune_targets": [
+        {"data_name": "_DA_HAR70plus_256_00", "num_feature": 6, "num_target": 7, "channel_adapt": "none"},
+        {"data_name": "_DA_HAR70plus_256_00", "num_feature": 6, "num_target": 7, "channel_adapt": "drop"},
+        {"data_name": "_DA_HAR70plus_256_00", "num_feature": 6, "num_target": 7, "channel_adapt": "pca"},
+        {"data_name": "_DA_HAR70plus_256_00", "num_feature": 6, "num_target": 7, "channel_adapt": "expand"}
+      ],
+      "fixed": {
+        "view2": "logsig",
+        "view3": "xf",
+        "encoder_type": "mlp_logsig",
+        "logsig_depth": 2,
+        "logsig_mode": "window",
+        "logsig_window_size": 64,
+        "logsig_lead_lag": 8,
+        "logsig_normalize": true,
+        "interaction_type": "bilinear",
+        "epochs_pretrain": 2,
+        "epochs_finetune": 10,
+        "batch_size_pretrain": 128
+      },
+      "grid": {
+        "seed": [0, 1, 2, 3, 4]
+      }
+    }
+  ]
+}

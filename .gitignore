@@ -193,3 +193,6 @@ logs/*
 *.zip
 capture24.zip
 data/
+SimMTM/*
+capture24_2_WISDM/
+HARTH_2_HAR70plus/

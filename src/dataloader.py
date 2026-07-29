@@ -2,7 +2,6 @@ import fcntl
 import os
 import torch
 import torch.fft as fft
-import torchcde
 from log_signatures_pytorch import log_signature, logsigdim
 from torch.utils.data import Dataset
 from typing import Tuple, Optional
@@ -32,9 +31,10 @@ def add_time_feature(X: torch.Tensor):
 
 
 def get_dx(X: torch.Tensor) -> torch.Tensor:
+    import torchcde
     N, L, D = X.shape
     t = torch.linspace(0, 1, L, dtype=X.dtype, device=X.device)
-    
+
     coeffs = torchcde.hermite_cubic_coefficients_with_backward_differences(X)
     spline = torchcde.CubicSpline(coeffs, t)
     dx = spline.derivative(t)
@@ -148,6 +148,7 @@ def get_logsig(
     global_time: bool = False,
     multi_smooth_params: list = None,
     normalize: bool = True,
+    lead_lag: int = 0,
 ) -> torch.Tensor:
     """Log signature view of the time-augmented path.
 
@@ -194,6 +195,11 @@ def get_logsig(
         stream mode:  [N, L,         C(+1)]  where C = logsigdim(D+1, depth)
         window modes: [N, L//stride, K*C(+1)] (K=1 when multi_smooth_params is None)
     """
+    if lead_lag > 0:
+        X_lagged = torch.zeros_like(X)
+        X_lagged[:, lead_lag:, :] = X[:, :-lead_lag, :]
+        X = torch.cat([X, X_lagged], dim=-1)  # [N, L, 2D]
+
     N, L, D = X.shape
     C_sig = logsigdim(D + 1, depth)
     _multi = (multi_smooth_params is not None
@@ -275,12 +281,17 @@ def get_logsig(
 
 def get_view_num_features(view: str, num_feature: int, logsig_depth: int,
                           global_time: bool = False,
-                          multi_smooth_params=None) -> int:
+                          multi_smooth_params=None,
+                          skip_level1: bool = False,
+                          lead_lag: int = 0) -> int:
     """Input feature dimension produced by the given view transform."""
     if view in ('xt', 'dx', 'xf'):
         return num_feature
     elif view == 'logsig':
-        c = logsigdim(num_feature + 1, logsig_depth)
+        path_dim = (2 * num_feature + 1) if lead_lag > 0 else (num_feature + 1)
+        c = logsigdim(path_dim, logsig_depth)
+        if skip_level1:
+            c -= path_dim  # level-1 has path_dim features
         if multi_smooth_params is not None and len(multi_smooth_params) > 0:
             c *= len(multi_smooth_params)
         return c + 1 if global_time else c
@@ -294,6 +305,8 @@ def preprocess_data(X_train, X_test, views=('xt', 'dx', 'xf'), logsig_depth=2,
                     logsig_stride=1, logsig_global_time=False,
                     logsig_multi_smooth_params=None,
                     logsig_normalize=False,
+                    logsig_skip_level1=False,
+                    logsig_lead_lag=0,
                     time_as_feature=False,
                     logsig_cache_key=None,
                     pca_components=None):
@@ -361,6 +374,7 @@ def preprocess_data(X_train, X_test, views=('xt', 'dx', 'xf'), logsig_depth=2,
                 global_time=logsig_global_time,
                 multi_smooth_params=logsig_multi_smooth_params,
                 normalize=False,  # per-level norm applied below using train stats
+                lead_lag=logsig_lead_lag,
             )
             if logsig_cache_key:
                 _cdir = 'preprocessed_data/.logsig_cache'
@@ -386,16 +400,34 @@ def preprocess_data(X_train, X_test, views=('xt', 'dx', 'xf'), logsig_depth=2,
             else:
                 data_tr = get_logsig(X_train_xt, **_logsig_kw)
                 data_te = get_logsig(X_test_xt,  **_logsig_kw)
+            _D_sig = X_train_xt.shape[-1] * (2 if logsig_lead_lag > 0 else 1)  # channels entering the signature
             if logsig_normalize:
                 _n_copies = len(logsig_multi_smooth_params) if logsig_multi_smooth_params else 1
                 _nlvl_kw = dict(
                     depth=logsig_depth,
-                    path_dim=X_train_xt.shape[-1] + 1,
+                    path_dim=_D_sig + 1,  # +1 for prepended time channel
                     num_copies=_n_copies,
                     global_time=logsig_global_time,
                 )
                 data_tr, _norm_stats = normalize_logsig_levels(data_tr, **_nlvl_kw)
                 data_te, _ = normalize_logsig_levels(data_te, **_nlvl_kw, stats=_norm_stats)
+            if logsig_skip_level1:
+                _D = _D_sig                     # effective path channels (before time)
+                _l1 = _D + 1                    # level-1 feature count = path_dim = D+1
+                _C  = logsigdim(_D + 1, logsig_depth)
+                _K  = len(logsig_multi_smooth_params) if logsig_multi_smooth_params else 1
+                _gt = logsig_global_time
+                if _K > 1:
+                    keep = [i for i in range(_K * _C) if i % _C >= _l1]
+                    if _gt:
+                        keep.append(_K * _C)
+                    data_tr = data_tr[..., keep]
+                    data_te = data_te[..., keep]
+                else:
+                    data_tr = torch.cat(
+                        [data_tr[..., _l1:_C]] + ([data_tr[..., _C:]] if _gt else []), dim=-1)
+                    data_te = torch.cat(
+                        [data_te[..., _l1:_C]] + ([data_te[..., _C:]] if _gt else []), dim=-1)
             data_tr, data_te, mean, std = normalize(data_tr, data_te)
         else:
             raise ValueError(f"Unknown view '{view}'. Choose from: xt, dx, xf, logsig")

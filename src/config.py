@@ -57,7 +57,7 @@ def get_args_parser():
                         help='data_name of the pretrained model; defaults to --data_name')
 
     # Which finetune modes to run
-    parser.add_argument('--run_modes', default='finetune,freeze,baseline', type=str,
+    parser.add_argument('--run_modes', default='finetune', type=str,
                         help='Comma-separated subset of finetune modes to run: '
                              'finetune, freeze, baseline (default: all three)')
 
@@ -121,6 +121,10 @@ def get_args_parser():
                         help='Normalize log-signature features per truncation level (z-score with '
                              'one shared mean/std per level, computed over all samples and timesteps). '
                              'Disabled by default for legacy compatibility.')
+    logsig.add_argument('--logsig_skip_level1', action='store_true',
+                        help='Drop the level-1 log-signature features (the path increments). '
+                             'Ablation: checks whether higher-order terms provide value beyond '
+                             'simple differences. Reduces feature dim by num_feature+1.')
     logsig.add_argument('--logsig_lag', default=0, type=int,
                         help='Temporal lag (in timesteps) for the logsig contrastive positive. '
                              'When > 0 and logsig_mode is window/window_smooth, the positive pair '
@@ -128,12 +132,47 @@ def get_args_parser():
                              'logsig_lag[t] = logsig[t-l], zero-padded for t < l. '
                              'Replaces the identity/noise augmentation for the logsig view. '
                              'Only meaningful in window/window_smooth mode. 0 = disabled (default).')
+    logsig.add_argument('--logsig_lead_lag', default=0, type=int,
+                        help='Lead-lag embedding before computing the log-signature. '
+                             'For a D-channel signal x(t), constructs the 2D-channel path '
+                             '[x(t), x(t-τ)] (with τ in timesteps) before prepending time. '
+                             'Level-2 cross-terms then capture the lagged cross-covariance '
+                             'between channels — geometric information a transformer on raw '
+                             'xt cannot easily approximate. For 1D signals, lead-lag makes '
+                             'otherwise-trivial level-2 self-terms non-zero. '
+                             'Path dim doubles: logsigdim(2D+1, depth) instead of (D+1, depth). '
+                             '0 = disabled (default).')
+
+    # Contrastive training objective
+    parser.add_argument('--redundancy_penalty', default=0.0, type=float,
+                        help='Barlow Twins cross-view redundancy penalty weight (β). '
+                             'When > 0, adds β * Σ_{i<j} ‖C(z_i, z_j)‖_F² / H to the '
+                             'pretraining loss, where C(z_i, z_j) is the normalised '
+                             'cross-correlation matrix between views i and j. '
+                             'Penalises redundancy between view projections and encourages '
+                             'each branch to learn complementary representations. '
+                             '0 = disabled (default).')
 
     # Dimensionality reduction
     parser.add_argument('--pca_components', default=None, type=int,
                         help='If set, reduce input channels to this many PCA components before '
                              'computing all views. Fit on training data only. Useful for '
                              'high-dimensional datasets (e.g. Opportunity 113ch → 32, Skoda 60ch → 4).')
+
+    # Cross-dataset finetune channel-count adaptation (finetune only; no-op if
+    # the finetune dataset's raw channel count already matches the pretrain
+    # checkpoint's). Mutually exclusive strategies — see src/channel_adapt.py.
+    parser.add_argument('--channel_adapt', default='none', type=str,
+                        choices=['none', 'drop', 'pca', 'expand'],
+                        help='How to resolve a raw-channel-count mismatch between the finetune '
+                             'dataset and the pretrain checkpoint: none (default) = no special '
+                             'handling, load_encoder() reinitialises the mismatched input '
+                             'projection; drop = keep the K=pretrain_num_feature finetune '
+                             'channels most similar to the pretrain channels by sensor-placement '
+                             'metadata (src/channel_adapt.py), dropping the rest, so the '
+                             'pretrained input projection transfers directly; pca = PCA-reduce '
+                             'finetune channels to K=pretrain_num_feature components (auto-sized '
+                             '--pca_components).')
 
     return parser
 

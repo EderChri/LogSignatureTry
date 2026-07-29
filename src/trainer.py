@@ -14,6 +14,27 @@ def add_weight_regularization(model, l2_scale=0.01):
     return sum(l2_scale * p.pow(2).sum() for p in model.parameters() if p.requires_grad)
 
 
+def _cross_redundancy_penalty(projs: list) -> torch.Tensor:
+    """Barlow Twins cross-view redundancy penalty.
+
+    Computes the sum of squared cross-correlation entries between every pair of
+    view projection embeddings.  High values mean the two branches encode the
+    same directions; penalising this pushes views toward complementary representations.
+
+    Returns the mean per hidden-dim so the scale is independent of H.
+    """
+    loss = projs[0].new_tensor(0.0)
+    for i in range(len(projs)):
+        for j in range(i + 1, len(projs)):
+            zi = projs[i]
+            zj = projs[j]
+            zi = (zi - zi.mean(0)) / zi.std(0).clamp(min=1e-8)
+            zj = (zj - zj.mean(0)) / zj.std(0).clamp(min=1e-8)
+            C = (zi.T @ zj) / zi.shape[0]   # [H, H] cross-correlation matrix
+            loss = loss + (C ** 2).sum() / C.shape[0]
+    return loss
+
+
 def _is_input_layer(name: str) -> bool:
     """True for input-projection params inside EncoderNView.branches.
 
@@ -72,6 +93,10 @@ def train(args, encoder, clf, encoder_optimizer, clf_optimizer,
 
             contrastive = sum(info_crit(projs[i], projs_aug[i]) for i in range(num_views))
             loss = contrastive + add_weight_regularization(encoder)
+
+            _rp = getattr(args, 'redundancy_penalty', 0.0)
+            if mode == 'pretrain' and _rp > 0.0:
+                loss = loss + _rp * _cross_redundancy_penalty(projs)
 
             if mode != 'pretrain':
                 inputs = projs if args.feature == 'latent' else hiddens

@@ -1,0 +1,509 @@
+{
+  "_comment": "Lead-lag and lag ablation suite for the logsig view. Run with: python scripts/run_experiments.py experiment_configs/experiments_leadlag_lag.json. All experiments fix logsig_mode=window, logsig_window_size=64, view2=logsig, view3=xf, interaction_type=bilinear, across encoder_type in {mlp_logsig, transformer}. For each (dataset pair, encoder_type) there are three blocks: (1) lead-lag sweep on the normalized window (logsig_normalize=true, logsig_lead_lag swept 0..32, logsig_lag=0), (2) lag sweep on the normalized window (logsig_normalize=true, logsig_lag swept 0..32, logsig_lead_lag=0), (3) the non-normalized win64 baseline (logsig_normalize omitted/false, logsig_lead_lag=0, logsig_lag=0). Sweeping 0 in (1)/(2) also yields the normalized-window baseline for free (pretrain dedup means it's only trained once).",
+  "experiments": [
+    {
+      "name": "HARTH→HAR70plus (mlp_logsig+bilinear): lead-lag sweep, normalized win64",
+      "pretrain": {
+        "data_name": "_DA_HARTH_256_00",
+        "num_feature": 6,
+        "num_target": 12
+      },
+      "finetune_targets": [
+        {
+          "data_name": "_DA_HAR70plus_256_00",
+          "num_feature": 6,
+          "num_target": 7
+        }
+      ],
+      "fixed": {
+        "view2": "logsig",
+        "view3": "xf",
+        "encoder_type": "mlp_logsig",
+        "logsig_depth": 2,
+        "logsig_mode": "window",
+        "logsig_window_size": 64,
+        "interaction_type": "bilinear",
+        "epochs_pretrain": 2,
+        "epochs_finetune": 10,
+        "batch_size_pretrain": 128,
+        "logsig_normalize": true
+      },
+      "grid": {
+        "logsig_lead_lag": [
+          8,
+          16,
+          32
+        ],
+        "seed": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ]
+      }
+    },
+    {
+      "name": "HARTH→HAR70plus (mlp_logsig+bilinear): lag sweep, normalized win64",
+      "pretrain": {
+        "data_name": "_DA_HARTH_256_00",
+        "num_feature": 6,
+        "num_target": 12
+      },
+      "finetune_targets": [
+        {
+          "data_name": "_DA_HAR70plus_256_00",
+          "num_feature": 6,
+          "num_target": 7
+        }
+      ],
+      "fixed": {
+        "view2": "logsig",
+        "view3": "xf",
+        "encoder_type": "mlp_logsig",
+        "logsig_depth": 2,
+        "logsig_mode": "window",
+        "logsig_window_size": 64,
+        "interaction_type": "bilinear",
+        "epochs_pretrain": 2,
+        "epochs_finetune": 10,
+        "batch_size_pretrain": 128,
+        "logsig_normalize": true
+      },
+      "grid": {
+        "logsig_lag": [
+          8,
+          16,
+          32
+        ],
+        "seed": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ]
+      }
+    },
+    {
+      "name": "HARTH→HAR70plus (transformer+bilinear): lead-lag sweep, normalized win64",
+      "pretrain": {
+        "data_name": "_DA_HARTH_256_00",
+        "num_feature": 6,
+        "num_target": 12
+      },
+      "finetune_targets": [
+        {
+          "data_name": "_DA_HAR70plus_256_00",
+          "num_feature": 6,
+          "num_target": 7
+        }
+      ],
+      "fixed": {
+        "view2": "logsig",
+        "view3": "xf",
+        "encoder_type": "transformer",
+        "logsig_depth": 2,
+        "logsig_mode": "window",
+        "logsig_window_size": 64,
+        "interaction_type": "bilinear",
+        "epochs_pretrain": 2,
+        "epochs_finetune": 10,
+        "batch_size_pretrain": 128,
+        "logsig_normalize": true
+      },
+      "grid": {
+        "logsig_lead_lag": [
+          8,
+          16,
+          32
+        ],
+        "seed": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ]
+      }
+    },
+    {
+      "name": "HARTH→HAR70plus (transformer+bilinear): lag sweep, normalized win64",
+      "pretrain": {
+        "data_name": "_DA_HARTH_256_00",
+        "num_feature": 6,
+        "num_target": 12
+      },
+      "finetune_targets": [
+        {
+          "data_name": "_DA_HAR70plus_256_00",
+          "num_feature": 6,
+          "num_target": 7
+        }
+      ],
+      "fixed": {
+        "view2": "logsig",
+        "view3": "xf",
+        "encoder_type": "transformer",
+        "logsig_depth": 2,
+        "logsig_mode": "window",
+        "logsig_window_size": 64,
+        "interaction_type": "bilinear",
+        "epochs_pretrain": 2,
+        "epochs_finetune": 10,
+        "batch_size_pretrain": 128,
+        "logsig_normalize": true
+      },
+      "grid": {
+        "logsig_lag": [
+          8,
+          16,
+          32
+        ],
+        "seed": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ]
+      }
+    },
+    {
+      "name": "capture24→WISDM (mlp_logsig+bilinear): lead-lag sweep, normalized win64",
+      "pretrain": {
+        "data_name": "_DA_capture24_256_00",
+        "num_feature": 3,
+        "num_target": 1
+      },
+      "finetune_targets": [
+        {
+          "data_name": "_DA_WISDM_256_00",
+          "num_feature": 3,
+          "num_target": 6
+        }
+      ],
+      "fixed": {
+        "view2": "logsig",
+        "view3": "xf",
+        "encoder_type": "mlp_logsig",
+        "logsig_depth": 2,
+        "logsig_mode": "window",
+        "logsig_window_size": 64,
+        "interaction_type": "bilinear",
+        "epochs_pretrain": 2,
+        "epochs_finetune": 10,
+        "batch_size_pretrain": 128,
+        "logsig_normalize": true
+      },
+      "grid": {
+        "logsig_lead_lag": [
+          8,
+          16,
+          32
+        ],
+        "seed": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ]
+      }
+    },
+    {
+      "name": "capture24→WISDM (mlp_logsig+bilinear): lag sweep, normalized win64",
+      "pretrain": {
+        "data_name": "_DA_capture24_256_00",
+        "num_feature": 3,
+        "num_target": 1
+      },
+      "finetune_targets": [
+        {
+          "data_name": "_DA_WISDM_256_00",
+          "num_feature": 3,
+          "num_target": 6
+        }
+      ],
+      "fixed": {
+        "view2": "logsig",
+        "view3": "xf",
+        "encoder_type": "mlp_logsig",
+        "logsig_depth": 2,
+        "logsig_mode": "window",
+        "logsig_window_size": 64,
+        "interaction_type": "bilinear",
+        "epochs_pretrain": 2,
+        "epochs_finetune": 10,
+        "batch_size_pretrain": 128,
+        "logsig_normalize": true
+      },
+      "grid": {
+        "logsig_lag": [
+          8,
+          16,
+          32
+        ],
+        "seed": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ]
+      }
+    },
+    {
+      "name": "capture24→WISDM (transformer+bilinear): lead-lag sweep, normalized win64",
+      "pretrain": {
+        "data_name": "_DA_capture24_256_00",
+        "num_feature": 3,
+        "num_target": 1
+      },
+      "finetune_targets": [
+        {
+          "data_name": "_DA_WISDM_256_00",
+          "num_feature": 3,
+          "num_target": 6
+        }
+      ],
+      "fixed": {
+        "view2": "logsig",
+        "view3": "xf",
+        "encoder_type": "transformer",
+        "logsig_depth": 2,
+        "logsig_mode": "window",
+        "logsig_window_size": 64,
+        "interaction_type": "bilinear",
+        "epochs_pretrain": 2,
+        "epochs_finetune": 10,
+        "batch_size_pretrain": 128,
+        "logsig_normalize": true
+      },
+      "grid": {
+        "logsig_lead_lag": [
+          8,
+          16,
+          32
+        ],
+        "seed": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ]
+      }
+    },
+    {
+      "name": "capture24→WISDM (transformer+bilinear): lag sweep, normalized win64",
+      "pretrain": {
+        "data_name": "_DA_capture24_256_00",
+        "num_feature": 3,
+        "num_target": 1
+      },
+      "finetune_targets": [
+        {
+          "data_name": "_DA_WISDM_256_00",
+          "num_feature": 3,
+          "num_target": 6
+        }
+      ],
+      "fixed": {
+        "view2": "logsig",
+        "view3": "xf",
+        "encoder_type": "transformer",
+        "logsig_depth": 2,
+        "logsig_mode": "window",
+        "logsig_window_size": 64,
+        "interaction_type": "bilinear",
+        "epochs_pretrain": 2,
+        "epochs_finetune": 10,
+        "batch_size_pretrain": 128,
+        "logsig_normalize": true
+      },
+      "grid": {
+        "logsig_lag": [
+          8,
+          16,
+          32
+        ],
+        "seed": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ]
+      }
+    },
+    {
+      "name": "capture24→HAR70plus (mlp_logsig+bilinear): lead-lag sweep, normalized win64",
+      "pretrain": {
+        "data_name": "_DA_capture24_256_00",
+        "num_feature": 3,
+        "num_target": 1
+      },
+      "finetune_targets": [
+        {
+          "data_name": "_DA_HAR70plus_256_00",
+          "num_feature": 6,
+          "num_target": 7
+        }
+      ],
+      "fixed": {
+        "view2": "logsig",
+        "view3": "xf",
+        "encoder_type": "mlp_logsig",
+        "logsig_depth": 2,
+        "logsig_mode": "window",
+        "logsig_window_size": 64,
+        "interaction_type": "bilinear",
+        "epochs_pretrain": 2,
+        "epochs_finetune": 10,
+        "batch_size_pretrain": 128,
+        "logsig_normalize": true
+      },
+      "grid": {
+        "logsig_lead_lag": [
+          8,
+          16,
+          32
+        ],
+        "seed": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ]
+      }
+    },
+    {
+      "name": "capture24→HAR70plus (mlp_logsig+bilinear): lag sweep, normalized win64",
+      "pretrain": {
+        "data_name": "_DA_capture24_256_00",
+        "num_feature": 3,
+        "num_target": 1
+      },
+      "finetune_targets": [
+        {
+          "data_name": "_DA_HAR70plus_256_00",
+          "num_feature": 6,
+          "num_target": 7
+        }
+      ],
+      "fixed": {
+        "view2": "logsig",
+        "view3": "xf",
+        "encoder_type": "mlp_logsig",
+        "logsig_depth": 2,
+        "logsig_mode": "window",
+        "logsig_window_size": 64,
+        "interaction_type": "bilinear",
+        "epochs_pretrain": 2,
+        "epochs_finetune": 10,
+        "batch_size_pretrain": 128,
+        "logsig_normalize": true
+      },
+      "grid": {
+        "logsig_lag": [
+          8,
+          16,
+          32
+        ],
+        "seed": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ]
+      }
+    },
+    {
+      "name": "capture24→HAR70plus (transformer+bilinear): lead-lag sweep, normalized win64",
+      "pretrain": {
+        "data_name": "_DA_capture24_256_00",
+        "num_feature": 3,
+        "num_target": 1
+      },
+      "finetune_targets": [
+        {
+          "data_name": "_DA_HAR70plus_256_00",
+          "num_feature": 6,
+          "num_target": 7
+        }
+      ],
+      "fixed": {
+        "view2": "logsig",
+        "view3": "xf",
+        "encoder_type": "transformer",
+        "logsig_depth": 2,
+        "logsig_mode": "window",
+        "logsig_window_size": 64,
+        "interaction_type": "bilinear",
+        "epochs_pretrain": 2,
+        "epochs_finetune": 10,
+        "batch_size_pretrain": 128,
+        "logsig_normalize": true
+      },
+      "grid": {
+        "logsig_lead_lag": [
+          8,
+          16,
+          32
+        ],
+        "seed": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ]
+      }
+    },
+    {
+      "name": "capture24→HAR70plus (transformer+bilinear): lag sweep, normalized win64",
+      "pretrain": {
+        "data_name": "_DA_capture24_256_00",
+        "num_feature": 3,
+        "num_target": 1
+      },
+      "finetune_targets": [
+        {
+          "data_name": "_DA_HAR70plus_256_00",
+          "num_feature": 6,
+          "num_target": 7
+        }
+      ],
+      "fixed": {
+        "view2": "logsig",
+        "view3": "xf",
+        "encoder_type": "transformer",
+        "logsig_depth": 2,
+        "logsig_mode": "window",
+        "logsig_window_size": 64,
+        "interaction_type": "bilinear",
+        "epochs_pretrain": 2,
+        "epochs_finetune": 10,
+        "batch_size_pretrain": 128,
+        "logsig_normalize": true
+      },
+      "grid": {
+        "logsig_lag": [
+          8,
+          16,
+          32
+        ],
+        "seed": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ]
+      }
+    }
+  ]
+}
