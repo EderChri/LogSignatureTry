@@ -74,7 +74,9 @@ DISABLED_WINDOWS = {
 
 _ALL_WINDOW_ORDER = ['global', 'win64', 'win64_sl1', 'win64_ll', 'win64_rp', 'win64_ll_rp',
                      'win64_norm_ll', 'win64_lsn0.1', 'norm_win64', 'norm_win64_lag',
-                     'win128', 'win128_s7', 'tukey64', 'tukey128', 'tukey128_s7']
+                     'win128', 'win128_s7', 'tukey64', 'tukey128', 'tukey128_d1',
+                     'tukey128_gt', 'tukey128_plast', 'tukey128_gt_plast',
+                     'tukey128_ll', 'tukey128_rp', 'tukey128_ll_rp', 'tukey128_s7']
 WINDOW_ORDER = [w for w in _ALL_WINDOW_ORDER if w not in DISABLED_WINDOWS]
 
 # ---------------------------------------------------------------------------
@@ -97,6 +99,13 @@ MAJOR_METHOD = {
     'win128_s7':      'win128',
     'tukey64':        'tukey64',
     'tukey128':       'tukey128',
+    'tukey128_d1':       'tukey128',
+    'tukey128_gt':       'tukey128',
+    'tukey128_plast':    'tukey128',
+    'tukey128_gt_plast': 'tukey128',
+    'tukey128_ll':    'tukey128',
+    'tukey128_rp':    'tukey128',
+    'tukey128_ll_rp': 'tukey128',
     'tukey128_s7':    'tukey128',
 }
 ADJUSTMENT = {
@@ -114,6 +123,13 @@ ADJUSTMENT = {
     'win128_s7':      'stride7',
     'tukey64':        'none',
     'tukey128':       'none',
+    'tukey128_d1':       'depth1',
+    'tukey128_gt':       'global_time',
+    'tukey128_plast':    'pool_last',
+    'tukey128_gt_plast': 'gt_pool_last',
+    'tukey128_ll':    'lead_lag',
+    'tukey128_rp':    'reduced_pen',
+    'tukey128_ll_rp': 'lead_lag_rp',
     'tukey128_s7':    'stride7',
 }
 
@@ -136,7 +152,8 @@ METHOD_MARKER = {
 }
 
 ADJUSTMENT_ORDER = ['none', 'no_lv1', 'lead_lag', 'reduced_pen', 'lead_lag_rp',
-                    'norm_leadlag', 'noise', 'lag', 'stride7']
+                    'norm_leadlag', 'noise', 'lag', 'stride7',
+                    'depth1', 'global_time', 'pool_last', 'gt_pool_last']
 ADJUSTMENT_LABEL = {
     'none':         'none',
     'no_lv1':       'no lv1',
@@ -147,9 +164,13 @@ ADJUSTMENT_LABEL = {
     'noise':        'noise',
     'lag':          'lag',
     'stride7':      'stride 7',
+    'depth1':       'depth 1',
+    'global_time':  'global time',
+    'pool_last':    'pool: last',
+    'gt_pool_last': 'global time + pool: last',
 }
-_tab10 = matplotlib.colormaps['tab10'].colors
-ADJUSTMENT_COLOR = {adj: _tab10[i % len(_tab10)] for i, adj in enumerate(ADJUSTMENT_ORDER)}
+_adj_palette = matplotlib.colormaps['tab20'].colors
+ADJUSTMENT_COLOR = {adj: _adj_palette[i % len(_adj_palette)] for i, adj in enumerate(ADJUSTMENT_ORDER)}
 
 # channel_adapt: overlay drawn on top of the base (method, adjustment) marker, so the
 # channel-adapt family still reads as "the same point, with a mark on it".
@@ -192,11 +213,14 @@ SIMMTM_SIZE     = MARKER_SIZE * 0.8
 # win64, win128, tukey64/128, norm_win64(+lag) (+ win64_norm_ll, win64_lsn0.1) have bilinear data.
 _BIL_WIN_SET = {'win64', 'win64_sl1', 'win64_ll', 'win64_rp', 'win64_ll_rp',
                 'win64_norm_ll', 'win64_lsn0.1', 'norm_win64', 'norm_win64_lag',
-                'win128', 'win128_s7', 'tukey64', 'tukey128', 'tukey128_s7'}
+                'win128', 'win128_s7', 'tukey64', 'tukey128', 'tukey128_d1',
+                'tukey128_gt', 'tukey128_plast', 'tukey128_gt_plast',
+                'tukey128_ll', 'tukey128_rp', 'tukey128_ll_rp', 'tukey128_s7'}
 
 # windows/model-types where capture24 channel-adapt trials (drop/pca/copy) exist,
 # as an overlay mark on top of the base point.
-_CHADAPT_WINDOWS = {'win64_norm_ll', 'norm_win64', 'norm_win64_lag'}
+_CHADAPT_WINDOWS = {'win64_norm_ll', 'norm_win64', 'norm_win64_lag',
+                     'tukey128', 'tukey128_ll', 'tukey128_rp', 'tukey128_ll_rp'}
 _CHADAPT_MODEL_TYPES = {'mlp_logsig_bilinear', 'transformer_bilinear'}
 
 
@@ -355,13 +379,12 @@ def read_simmtm_tsv(path: str, metric: str = 'accuracy'):
 # Parsing
 # ---------------------------------------------------------------------------
 
-def parse_finetune_row(name: str):
+def parse_run_row(name: str):
     """Return (view_key, window, encoder, channel_adapt) or None.
-    Only capture24_256_00 pretrain — this file is scoped to one pretrain source."""
-    if not name or not name.endswith('_finetune'):
-        return None
-    if PRETRAIN_TAG not in name:
-        return None
+
+    Shared core for any run name (finetune/baseline/freeze) — suffix and
+    pretrain-source filtering are the caller's responsibility.
+    """
     if any(m in name for m in ('_ilcrosstime_', '_ilviewembed_')):
         return None
 
@@ -404,6 +427,14 @@ def parse_finetune_row(name: str):
         lsn_m = re.search(r'_lsn([\d.]+)_', name)
         if lsn_m:
             window = f'{window}_lsn{lsn_m.group(1)}'
+        # logsig_global_time / logsig_pool ablation (mechanistic depth/gt/pool sweep)
+        if '_gt_' in name:
+            window = window + '_gt'
+        if '_plast' in name:
+            window = window + '_plast'
+        depth_m = re.search(r'_d(\d+)_', name)
+        if depth_m:
+            window = window + f'_d{depth_m.group(1)}'
         if '_sl1' in name:
             window = window + '_sl1'
         if has_lead_lag:
@@ -424,7 +455,22 @@ def parse_finetune_row(name: str):
     return view_key, window, encoder, channel_adapt
 
 
-def read_tsv(path: str):
+def parse_finetune_row(name: str):
+    """Return (view_key, window, encoder, channel_adapt) or None.
+    Only capture24_256_00 pretrain — this file is scoped to one pretrain source."""
+    if not name or not name.endswith('_finetune'):
+        return None
+    if PRETRAIN_TAG not in name:
+        return None
+    # The dx+xf baseline was swept at ep2 (the comparable, many-seed set); the
+    # sparse ep200 dx+xf reruns are one-off and not part of that comparison.
+    m_ep = re.search(r'v2dx_v3xf_ep(\d+)_', name)
+    if m_ep and m_ep.group(1) != '2':
+        return None
+    return parse_run_row(name)
+
+
+def read_tsv(path: str, parser=parse_finetune_row):
     """Return dict (view_key, window, encoder, channel_adapt) → list[float]."""
     scores = {}
     try:
@@ -436,7 +482,7 @@ def read_tsv(path: str):
                 parts = line.split('\t')
                 if len(parts) < 2:
                     continue
-                parsed = parse_finetune_row(parts[0])
+                parsed = parser(parts[0])
                 if parsed is None:
                     continue
                 try:

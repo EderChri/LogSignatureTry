@@ -12,6 +12,7 @@ import os
 import pickle
 import numpy as np
 import pandas as pd
+import torch
 from sklearn.model_selection import train_test_split
 
 
@@ -45,6 +46,12 @@ RNG_SEED = 0
 # Patient-level split sizes for HAR70plus (3 train / 2 val / 13 test out of 18 subjects)
 HAR70PLUS_N_TRAIN = 3
 HAR70PLUS_N_VAL   = 2
+
+# Patient-level split sizes for HARTH (31 subjects), matching HAR70plus's
+# train/val/test proportions (3/2/13 out of 18 -> ~16.7%/11.1%/72.2%) as closely
+# as integer subject counts allow: 5/3/23 out of 31 -> ~16.1%/9.7%/74.2%.
+HARTH_N_TRAIN = 5
+HARTH_N_VAL   = 3
 
 
 def _window_file(fpath: str, keep_labels: set):
@@ -151,7 +158,7 @@ def preprocess_domain_ts(name: str):
     print(f'Processed data saved to {out}')
 
 
-def preprocess_HARTH(data_dir: str = 'harth'):
+def preprocess_HARTH(data_dir: str = 'data/harth'):
     out = 'preprocessed_data/_DA_HARTH_256_00.pkl'
     if os.path.exists(out):
         print(f'Skipping {out}: already exists.')
@@ -159,18 +166,28 @@ def preprocess_HARTH(data_dir: str = 'harth'):
     files = sorted(glob.glob(os.path.join(data_dir, '*.csv')))
     if not files:
         raise FileNotFoundError(f"No CSV files found in '{data_dir}'")
-    print(f'HARTH: windowing {len(files)} subjects (all data → X_train, no split)…')
-    X_train, y_train = _pool_files(files, HARTH_KEEP_LABELS)
-    [y_train], label_map = _remap_labels([y_train], HARTH_KEEP_LABELS)
-    D = len(ACCEL_COLS)
-    X_empty = np.empty((0, D, WINDOW_LEN), dtype=np.float64)
-    y_empty = np.empty((0,), dtype=np.int64)
-    print(f'  X_train: {X_train.shape}, classes: {len(label_map)}, map: {label_map}')
+    print(f'HARTH: {len(files)} subjects, patient-level split '
+          f'({HARTH_N_TRAIN} train / {HARTH_N_VAL} val / '
+          f'{len(files) - HARTH_N_TRAIN - HARTH_N_VAL} test)…')
+    rng = np.random.default_rng(RNG_SEED)
+    train_files, val_files, test_files = _stratified_patient_split(
+        files, HARTH_KEEP_LABELS, HARTH_N_TRAIN, HARTH_N_VAL, rng)
+    print(f'  Train subjects: {[os.path.basename(f) for f in train_files]}')
+    print(f'  Val subjects:   {[os.path.basename(f) for f in val_files]}')
+    print(f'  Test subjects:  {[os.path.basename(f) for f in test_files]}')
+    X_tr, y_tr = _pool_files(train_files, HARTH_KEEP_LABELS)
+    X_va, y_va = _pool_files(val_files,   HARTH_KEEP_LABELS)
+    X_te, y_te = _pool_files(test_files,  HARTH_KEEP_LABELS)
+    [y_tr, y_va, y_te], label_map = _remap_labels([y_tr, y_va, y_te], HARTH_KEEP_LABELS)
+    total = len(y_tr) + len(y_va) + len(y_te)
+    print(f'  train: {len(y_tr)}, val: {len(y_va)}, test: {len(y_te)}  '
+          f'({len(y_tr)/total:.1%} / {len(y_va)/total:.1%} / {len(y_te)/total:.1%}), '
+          f'classes: {len(label_map)}, map: {label_map}')
     os.makedirs('preprocessed_data', exist_ok=True)
     with open(out, 'wb') as f:
-        pickle.dump([X_train, None, None, y_train,
-                     X_empty, None, None, y_empty,
-                     X_empty, None, None, y_empty], f)
+        pickle.dump([X_tr, None, None, y_tr,
+                     X_va, None, None, y_va,
+                     X_te, None, None, y_te], f)
     print(f'  Saved → {out}')
 
 
@@ -200,6 +217,67 @@ def preprocess_HAR70plus(data_dir: str = 'har70plus'):
           f'({len(y_tr)/total:.1%}/{len(y_va)/total:.1%}/{len(y_te)/total:.1%})')
     print(f'  Train classes: {np.unique(y_tr).tolist()}, Val classes: {np.unique(y_va).tolist()}')
     print(f'  Label map: {label_map}')
+    os.makedirs('preprocessed_data', exist_ok=True)
+    with open(out, 'wb') as f:
+        pickle.dump([X_tr, None, None, y_tr,
+                     X_va, None, None, y_va,
+                     X_te, None, None, y_te], f)
+    print(f'  Saved → {out}')
+
+
+# ---------------------------------------------------------------------------
+# FD-A/B/C/D (bearing fault diagnosis, TF-C benchmark)
+# ---------------------------------------------------------------------------
+#
+# Source: fd_raw/{split}_{domain}.pt — dict with 'samples' [N, 5120] (1-channel
+# vibration signal) and 'labels' [N] (3 classes), fixed train/val/test splits,
+# native sequence length 5120.
+#
+# Native length (5120) is far longer than the 256 used by the rest of the
+# pipeline, so resampling is unavoidable to reuse the shared architecture and
+# tooling — but it's lossy for a vibration signal (~20x downsample discards
+# high-frequency content the FFT/derivative views would otherwise use). The
+# resampled length is baked into the dataset tag itself (FD-{domain}-256)
+# rather than hidden in the "256_00" suffix alone, so it reads as an explicit
+# assumption. A future FD-{domain}-ORG variant at native length can be added
+# alongside it without ambiguity.
+
+FD_DOMAINS = ['A', 'B', 'C', 'D']
+FD_RAW_DIR = 'fd_raw'
+FD_SEQ_LEN = 256
+
+
+def _load_fd_domain_raw(domain: str):
+    splits = {}
+    for split in ('train', 'val', 'test'):
+        fpath = os.path.join(FD_RAW_DIR, f'{split}_{domain.lower()}.pt')
+        d = torch.load(fpath, map_location='cpu')
+        X = d['samples'].numpy().astype(np.float64)[:, None, :]  # (N, 1, L)
+        y = d['labels'].numpy().astype(np.int64)
+        splits[split] = (X, y)
+    return splits['train'], splits['val'], splits['test']
+
+
+def preprocess_FD(domain: str, seq_len: int = FD_SEQ_LEN):
+    """Bearing fault diagnosis domain {domain} (A/B/C/D), resampled to seq_len."""
+    tag = f'FD-{domain}-{seq_len}'
+    out = f'preprocessed_data/_DA_{tag}_{seq_len}_00.pkl'
+    if os.path.exists(out):
+        print(f'Skipping {out}: already exists.')
+        return
+    if not os.path.isdir(FD_RAW_DIR):
+        raise FileNotFoundError(f"Raw FD directory not found: '{FD_RAW_DIR}'")
+
+    (X_tr, y_tr), (X_va, y_va), (X_te, y_te) = _load_fd_domain_raw(domain)
+
+    print(f'FD-{domain}: native {X_tr.shape[2]} -> {seq_len}, '
+          f'train {X_tr.shape[0]}, val {X_va.shape[0]}, test {X_te.shape[0]}, '
+          f'classes {len(np.unique(y_tr))}')
+
+    X_tr = get_same_len(X_tr, seq_len)
+    X_va = get_same_len(X_va, seq_len)
+    X_te = get_same_len(X_te, seq_len)
+
     os.makedirs('preprocessed_data', exist_ok=True)
     with open(out, 'wb') as f:
         pickle.dump([X_tr, None, None, y_tr,
@@ -393,7 +471,7 @@ def preprocess_npy_dataset(name: str, seq_len: int = 256, rng_seed: int = 0):
 # Registry — maps CLI dataset name → callable
 # ---------------------------------------------------------------------------
 
-DOMAIN_TS_NAMES = ['ECG', 'EMG', 'Epilepsy', 'FD-B', 'Gesture', 'SleepEEG']
+DOMAIN_TS_NAMES = ['ECG', 'EMG', 'Epilepsy', 'Gesture', 'SleepEEG']
 
 DATASET_REGISTRY = {
     name: (lambda n=name: preprocess_domain_ts(n))
@@ -405,6 +483,8 @@ DATASET_REGISTRY['capture24']     = preprocess_capture24
 DATASET_REGISTRY['capture24mini'] = lambda: preprocess_capture24(mini=True)
 for _npy_name in _NPY_CONFIGS:
     DATASET_REGISTRY[_npy_name] = lambda n=_npy_name: preprocess_npy_dataset(n)
+for _fd_domain in FD_DOMAINS:
+    DATASET_REGISTRY[f'FD-{_fd_domain}-{FD_SEQ_LEN}'] = (lambda d=_fd_domain: preprocess_FD(d))
 
 
 # ---------------------------------------------------------------------------

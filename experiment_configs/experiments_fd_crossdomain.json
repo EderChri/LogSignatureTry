@@ -1,0 +1,445 @@
+{
+  "_comment": "Cross-domain bearing fault diagnosis pairs (FD-A/B/C/D, all 12 ordered pairs, see datasets.cfg cfg_fd{x}_fd{y}). Hub-and-spoke layout: one pretrain block per source domain, finetuning on the other three (mirrors the capture24→{WISDM,WISDM2} pattern in experiments.json) — covers all 12 pairs with only 4 pretrain runs per window size instead of 12. Two blocks per source domain, logsig+xf / mlp_logsig+bilinear, differing only in logsig_window_size (64 vs 128). 'None adjustment' baseline: logsig_lead_lag=0 and logsig_lag=0 (both left at their defaults, not swept). channel_adapt=none explicitly set (also the default) since all FD domains share the same 1-channel vibration signal layout, so no cross-dataset channel adaptation is needed. Cheap sweep budget (epochs_pretrain=2, epochs_finetune=10), seeds 0-9, run_modes=finetune,freeze,baseline — matches experiments_har70plus_harth.json. Run with: python scripts/run_experiments.py experiment_configs/experiments_fd_crossdomain.json --gpus 6,7,8",
+  "experiments": [
+    {
+      "name": "FD-A→{FD-B,FD-C,FD-D} (mlp_logsig+bilinear): logsig+xf win64, none adjustment",
+      "enabled": true,
+      "pretrain": {
+        "data_name": "_DA_FD-A-256_256_00",
+        "num_feature": 1,
+        "num_target": 3
+      },
+      "finetune_targets": [
+        {
+          "data_name": "_DA_FD-B-256_256_00",
+          "num_feature": 1,
+          "num_target": 3
+        },
+        {
+          "data_name": "_DA_FD-C-256_256_00",
+          "num_feature": 1,
+          "num_target": 3
+        },
+        {
+          "data_name": "_DA_FD-D-256_256_00",
+          "num_feature": 1,
+          "num_target": 3
+        }
+      ],
+      "fixed": {
+        "view2": "logsig",
+        "view3": "xf",
+        "encoder_type": "mlp_logsig",
+        "logsig_depth": 2,
+        "logsig_mode": "window",
+        "logsig_window_size": 64,
+        "logsig_normalize": true,
+        "interaction_type": "bilinear",
+        "channel_adapt": "none",
+        "epochs_pretrain": 2,
+        "epochs_finetune": 10,
+        "batch_size_pretrain": 128,
+        "run_modes": "finetune,freeze,baseline"
+      },
+      "grid": {
+        "seed": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9
+        ]
+      }
+    },
+    {
+      "name": "FD-B→{FD-A,FD-C,FD-D} (mlp_logsig+bilinear): logsig+xf win64, none adjustment",
+      "enabled": true,
+      "pretrain": {
+        "data_name": "_DA_FD-B-256_256_00",
+        "num_feature": 1,
+        "num_target": 3
+      },
+      "finetune_targets": [
+        {
+          "data_name": "_DA_FD-A-256_256_00",
+          "num_feature": 1,
+          "num_target": 3
+        },
+        {
+          "data_name": "_DA_FD-C-256_256_00",
+          "num_feature": 1,
+          "num_target": 3
+        },
+        {
+          "data_name": "_DA_FD-D-256_256_00",
+          "num_feature": 1,
+          "num_target": 3
+        }
+      ],
+      "fixed": {
+        "view2": "logsig",
+        "view3": "xf",
+        "encoder_type": "mlp_logsig",
+        "logsig_depth": 2,
+        "logsig_mode": "window",
+        "logsig_window_size": 64,
+        "logsig_normalize": true,
+        "interaction_type": "bilinear",
+        "channel_adapt": "none",
+        "epochs_pretrain": 2,
+        "epochs_finetune": 10,
+        "batch_size_pretrain": 128,
+        "run_modes": "finetune,freeze,baseline"
+      },
+      "grid": {
+        "seed": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9
+        ]
+      }
+    },
+    {
+      "name": "FD-C→{FD-A,FD-B,FD-D} (mlp_logsig+bilinear): logsig+xf win64, none adjustment",
+      "enabled": true,
+      "pretrain": {
+        "data_name": "_DA_FD-C-256_256_00",
+        "num_feature": 1,
+        "num_target": 3
+      },
+      "finetune_targets": [
+        {
+          "data_name": "_DA_FD-A-256_256_00",
+          "num_feature": 1,
+          "num_target": 3
+        },
+        {
+          "data_name": "_DA_FD-B-256_256_00",
+          "num_feature": 1,
+          "num_target": 3
+        },
+        {
+          "data_name": "_DA_FD-D-256_256_00",
+          "num_feature": 1,
+          "num_target": 3
+        }
+      ],
+      "fixed": {
+        "view2": "logsig",
+        "view3": "xf",
+        "encoder_type": "mlp_logsig",
+        "logsig_depth": 2,
+        "logsig_mode": "window",
+        "logsig_window_size": 64,
+        "logsig_normalize": true,
+        "interaction_type": "bilinear",
+        "channel_adapt": "none",
+        "epochs_pretrain": 2,
+        "epochs_finetune": 10,
+        "batch_size_pretrain": 128,
+        "run_modes": "finetune,freeze,baseline"
+      },
+      "grid": {
+        "seed": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9
+        ]
+      }
+    },
+    {
+      "name": "FD-D→{FD-A,FD-B,FD-C} (mlp_logsig+bilinear): logsig+xf win64, none adjustment",
+      "enabled": true,
+      "pretrain": {
+        "data_name": "_DA_FD-D-256_256_00",
+        "num_feature": 1,
+        "num_target": 3
+      },
+      "finetune_targets": [
+        {
+          "data_name": "_DA_FD-A-256_256_00",
+          "num_feature": 1,
+          "num_target": 3
+        },
+        {
+          "data_name": "_DA_FD-B-256_256_00",
+          "num_feature": 1,
+          "num_target": 3
+        },
+        {
+          "data_name": "_DA_FD-C-256_256_00",
+          "num_feature": 1,
+          "num_target": 3
+        }
+      ],
+      "fixed": {
+        "view2": "logsig",
+        "view3": "xf",
+        "encoder_type": "mlp_logsig",
+        "logsig_depth": 2,
+        "logsig_mode": "window",
+        "logsig_window_size": 64,
+        "logsig_normalize": true,
+        "interaction_type": "bilinear",
+        "channel_adapt": "none",
+        "epochs_pretrain": 2,
+        "epochs_finetune": 10,
+        "batch_size_pretrain": 128,
+        "run_modes": "finetune,freeze,baseline"
+      },
+      "grid": {
+        "seed": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9
+        ]
+      }
+    },
+    {
+      "name": "FD-A→{FD-B,FD-C,FD-D} (mlp_logsig+bilinear): logsig+xf win128, none adjustment",
+      "enabled": true,
+      "pretrain": {
+        "data_name": "_DA_FD-A-256_256_00",
+        "num_feature": 1,
+        "num_target": 3
+      },
+      "finetune_targets": [
+        {
+          "data_name": "_DA_FD-B-256_256_00",
+          "num_feature": 1,
+          "num_target": 3
+        },
+        {
+          "data_name": "_DA_FD-C-256_256_00",
+          "num_feature": 1,
+          "num_target": 3
+        },
+        {
+          "data_name": "_DA_FD-D-256_256_00",
+          "num_feature": 1,
+          "num_target": 3
+        }
+      ],
+      "fixed": {
+        "view2": "logsig",
+        "view3": "xf",
+        "encoder_type": "mlp_logsig",
+        "logsig_depth": 2,
+        "logsig_mode": "window",
+        "logsig_window_size": 128,
+        "logsig_normalize": true,
+        "interaction_type": "bilinear",
+        "channel_adapt": "none",
+        "epochs_pretrain": 2,
+        "epochs_finetune": 10,
+        "batch_size_pretrain": 128,
+        "run_modes": "finetune,freeze,baseline"
+      },
+      "grid": {
+        "seed": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9
+        ]
+      }
+    },
+    {
+      "name": "FD-B→{FD-A,FD-C,FD-D} (mlp_logsig+bilinear): logsig+xf win128, none adjustment",
+      "enabled": true,
+      "pretrain": {
+        "data_name": "_DA_FD-B-256_256_00",
+        "num_feature": 1,
+        "num_target": 3
+      },
+      "finetune_targets": [
+        {
+          "data_name": "_DA_FD-A-256_256_00",
+          "num_feature": 1,
+          "num_target": 3
+        },
+        {
+          "data_name": "_DA_FD-C-256_256_00",
+          "num_feature": 1,
+          "num_target": 3
+        },
+        {
+          "data_name": "_DA_FD-D-256_256_00",
+          "num_feature": 1,
+          "num_target": 3
+        }
+      ],
+      "fixed": {
+        "view2": "logsig",
+        "view3": "xf",
+        "encoder_type": "mlp_logsig",
+        "logsig_depth": 2,
+        "logsig_mode": "window",
+        "logsig_window_size": 128,
+        "logsig_normalize": true,
+        "interaction_type": "bilinear",
+        "channel_adapt": "none",
+        "epochs_pretrain": 2,
+        "epochs_finetune": 10,
+        "batch_size_pretrain": 128,
+        "run_modes": "finetune,freeze,baseline"
+      },
+      "grid": {
+        "seed": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9
+        ]
+      }
+    },
+    {
+      "name": "FD-C→{FD-A,FD-B,FD-D} (mlp_logsig+bilinear): logsig+xf win128, none adjustment",
+      "enabled": true,
+      "pretrain": {
+        "data_name": "_DA_FD-C-256_256_00",
+        "num_feature": 1,
+        "num_target": 3
+      },
+      "finetune_targets": [
+        {
+          "data_name": "_DA_FD-A-256_256_00",
+          "num_feature": 1,
+          "num_target": 3
+        },
+        {
+          "data_name": "_DA_FD-B-256_256_00",
+          "num_feature": 1,
+          "num_target": 3
+        },
+        {
+          "data_name": "_DA_FD-D-256_256_00",
+          "num_feature": 1,
+          "num_target": 3
+        }
+      ],
+      "fixed": {
+        "view2": "logsig",
+        "view3": "xf",
+        "encoder_type": "mlp_logsig",
+        "logsig_depth": 2,
+        "logsig_mode": "window",
+        "logsig_window_size": 128,
+        "logsig_normalize": true,
+        "interaction_type": "bilinear",
+        "channel_adapt": "none",
+        "epochs_pretrain": 2,
+        "epochs_finetune": 10,
+        "batch_size_pretrain": 128,
+        "run_modes": "finetune,freeze,baseline"
+      },
+      "grid": {
+        "seed": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9
+        ]
+      }
+    },
+    {
+      "name": "FD-D→{FD-A,FD-B,FD-C} (mlp_logsig+bilinear): logsig+xf win128, none adjustment",
+      "enabled": true,
+      "pretrain": {
+        "data_name": "_DA_FD-D-256_256_00",
+        "num_feature": 1,
+        "num_target": 3
+      },
+      "finetune_targets": [
+        {
+          "data_name": "_DA_FD-A-256_256_00",
+          "num_feature": 1,
+          "num_target": 3
+        },
+        {
+          "data_name": "_DA_FD-B-256_256_00",
+          "num_feature": 1,
+          "num_target": 3
+        },
+        {
+          "data_name": "_DA_FD-C-256_256_00",
+          "num_feature": 1,
+          "num_target": 3
+        }
+      ],
+      "fixed": {
+        "view2": "logsig",
+        "view3": "xf",
+        "encoder_type": "mlp_logsig",
+        "logsig_depth": 2,
+        "logsig_mode": "window",
+        "logsig_window_size": 128,
+        "logsig_normalize": true,
+        "interaction_type": "bilinear",
+        "channel_adapt": "none",
+        "epochs_pretrain": 2,
+        "epochs_finetune": 10,
+        "batch_size_pretrain": 128,
+        "run_modes": "finetune,freeze,baseline"
+      },
+      "grid": {
+        "seed": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9
+        ]
+      }
+    }
+  ]
+}

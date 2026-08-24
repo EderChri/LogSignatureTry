@@ -61,7 +61,8 @@
         "epochs_pretrain": 200,
         "epochs_finetune": 100,
         "batch_size_pretrain": 128,
-        "run_modes": "finetune"
+        "run_modes": "finetune",
+        "full_training": true
       },
       "grid": {
         "seed": [3, 4, 5, 6, 7, 8, 9]

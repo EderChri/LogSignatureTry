@@ -26,7 +26,8 @@
         "interaction_type": "bilinear",
         "epochs_pretrain": 2,
         "epochs_finetune": 10,
-        "batch_size_pretrain": 128
+        "batch_size_pretrain": 128,
+        "full_training": true
       },
       "grid": {
         "seed": [0, 1, 2, 3, 4]

@@ -67,7 +67,8 @@
         "epochs_pretrain": 2,
         "epochs_finetune": 10,
         "batch_size_pretrain": 128,
-        "run_modes": "finetune,freeze,baseline"
+        "run_modes": "finetune,freeze,baseline",
+        "full_training": true
       },
       "grid": {
         "seed": [
@@ -247,7 +248,8 @@
         "epochs_pretrain": 2,
         "epochs_finetune": 10,
         "batch_size_pretrain": 128,
-        "run_modes": "finetune,freeze,baseline"
+        "run_modes": "finetune,freeze,baseline",
+        "full_training": true
       },
       "grid": {
         "seed": [
@@ -425,7 +427,8 @@
         "epochs_pretrain": 2,
         "epochs_finetune": 10,
         "batch_size_pretrain": 128,
-        "run_modes": "finetune"
+        "run_modes": "finetune",
+        "full_training": true
       },
       "grid": {
         "seed": [
@@ -696,7 +699,8 @@
         "epochs_pretrain": 2,
         "epochs_finetune": 10,
         "batch_size_pretrain": 128,
-        "run_modes": "finetune"
+        "run_modes": "finetune",
+        "full_training": true
       },
       "grid": {
         "logsig_lead_lag": [
@@ -740,7 +744,8 @@
         "epochs_pretrain": 2,
         "epochs_finetune": 10,
         "batch_size_pretrain": 128,
-        "run_modes": "finetune"
+        "run_modes": "finetune",
+        "full_training": true
       },
       "grid": {
         "logsig_lag": [
@@ -962,7 +967,8 @@
         "epochs_pretrain": 2,
         "epochs_finetune": 10,
         "batch_size_pretrain": 128,
-        "run_modes": "finetune"
+        "run_modes": "finetune",
+        "full_training": true
       },
       "grid": {
         "logsig_lead_lag": [
@@ -1006,7 +1012,8 @@
         "epochs_pretrain": 2,
         "epochs_finetune": 10,
         "batch_size_pretrain": 128,
-        "run_modes": "finetune"
+        "run_modes": "finetune",
+        "full_training": true
       },
       "grid": {
         "logsig_lag": [
@@ -1349,7 +1356,8 @@
         "epochs_pretrain": 2,
         "epochs_finetune": 10,
         "batch_size_pretrain": 128,
-        "run_modes": "finetune"
+        "run_modes": "finetune",
+        "full_training": true
       },
       "grid": {
         "logsig_lead_lag": [
@@ -1564,7 +1572,8 @@
         "epochs_pretrain": 200,
         "epochs_finetune": 100,
         "batch_size_pretrain": 128,
-        "run_modes": "finetune"
+        "run_modes": "finetune",
+        "full_training": true
       },
       "grid": {
         "seed": [
@@ -1601,7 +1610,8 @@
         "epochs_pretrain": 200,
         "epochs_finetune": 100,
         "batch_size_pretrain": 128,
-        "run_modes": "finetune"
+        "run_modes": "finetune",
+        "full_training": true
       },
       "grid": {
         "seed": [

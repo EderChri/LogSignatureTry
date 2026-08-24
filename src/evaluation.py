@@ -15,11 +15,16 @@ def get_clf_acc(args, encoder, clf, loader, device):
     return metrics['accuracy']
 
 
-def get_clf_metrics(args, encoder, clf, loader, device):
+def get_clf_metrics(args, encoder, clf, loader, device, subject_ids=None):
     """Compute classification metrics for EncoderNView + ClassifierNView.
 
     Batch format from Load_Dataset:
         (*views_orig[N], *views_aug[N], y)  — 2*N + 1 tensors.
+
+    subject_ids: optional array-like, one id per sample, aligned index-for-index
+        with `loader`'s (non-shuffled) iteration order. When given, also computes
+        'f1_subject_macro' — the per-subject macro-F1 (sklearn default label set,
+        i.e. classes present for that subject), averaged unweighted across subjects.
     """
     encoder.eval()
     clf.eval()
@@ -71,6 +76,22 @@ def get_clf_metrics(args, encoder, clf, loader, device):
             print(f"Warning: Only one class present in the evaluation set "
                   f"(Class {np.unique(y_true)[0]}). AUROC and AUPRC are undefined.")
 
+        f1_subject_macro, n_subjects = None, None
+        if subject_ids is not None:
+            subject_ids = np.asarray(subject_ids)
+            if len(subject_ids) == len(y_true):
+                per_subject_f1 = []
+                for subj in np.unique(subject_ids):
+                    mask = subject_ids == subj
+                    _, _, f1_s, _ = precision_recall_fscore_support(
+                        y_true[mask], y_pred[mask], average='macro', zero_division=0)
+                    per_subject_f1.append(f1_s)
+                f1_subject_macro = float(np.mean(per_subject_f1))
+                n_subjects = len(per_subject_f1)
+            else:
+                print(f'Warning: subject_ids length ({len(subject_ids)}) != '
+                      f'evaluation set size ({len(y_true)}); skipping f1_subject_macro.')
+
         return {
             'accuracy':         accuracy,
             'precision':        precision,
@@ -80,6 +101,8 @@ def get_clf_metrics(args, encoder, clf, loader, device):
             'confusion_matrix': cm,
             'auroc':            auroc,
             'auprc':            auprc,
+            'f1_subject_macro': f1_subject_macro,
+            'n_subjects':       n_subjects,
         }
 
 

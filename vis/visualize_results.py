@@ -57,7 +57,9 @@ VIEW_LABEL = {
 
 _ALL_WINDOW_ORDER = ['global', 'win64', 'win64_sl1', 'win64_ll', 'win64_rp', 'win64_ll_rp',
                      'win64_norm_ll', 'norm_win64', 'norm_win64_lag', 'win128', 'win128_s7',
-                     'tukey64', 'tukey128', 'tukey128_s7']
+                     'tukey64', 'tukey128', 'tukey128_d1', 'tukey128_gt', 'tukey128_plast',
+                     'tukey128_gt_plast', 'tukey128_ll', 'tukey128_rp', 'tukey128_ll_rp',
+                     'tukey128_s7']
 WINDOW_ORDER = [w for w in _ALL_WINDOW_ORDER if w not in DISABLED_WINDOWS]
 WINDOW_LABEL = {
     'global':        'global',
@@ -73,6 +75,13 @@ WINDOW_LABEL = {
     'win128_s7':     'win 128\ns7',
     'tukey64':       'tukey 64',
     'tukey128':      'tukey 128',
+    'tukey128_d1':       'tukey 128\ndepth 1',
+    'tukey128_gt':       'tukey 128\n+global time',
+    'tukey128_plast':    'tukey 128\n+pool last',
+    'tukey128_gt_plast': 'tukey 128\n+gt+plast',
+    'tukey128_ll':       'tukey 128\n+lead-lag',
+    'tukey128_rp':       'tukey 128\n+red. pen.',
+    'tukey128_ll_rp':    'tukey 128\n+ll+rp',
     'tukey128_s7':   'tukey 128\ns7',
 }
 _cmap = matplotlib.colormaps['nipy_spectral']
@@ -98,6 +107,13 @@ MAJOR_METHOD = {
     'win128_s7':      'win128',
     'tukey64':        'tukey64',
     'tukey128':       'tukey128',
+    'tukey128_d1':       'tukey128',
+    'tukey128_gt':       'tukey128',
+    'tukey128_plast':    'tukey128',
+    'tukey128_gt_plast': 'tukey128',
+    'tukey128_ll':    'tukey128',
+    'tukey128_rp':    'tukey128',
+    'tukey128_ll_rp': 'tukey128',
     'tukey128_s7':    'tukey128',
 }
 ADJUSTMENT = {
@@ -114,6 +130,13 @@ ADJUSTMENT = {
     'win128_s7':      'stride7',
     'tukey64':        'none',
     'tukey128':       'none',
+    'tukey128_d1':       'depth1',
+    'tukey128_gt':       'global_time',
+    'tukey128_plast':    'pool_last',
+    'tukey128_gt_plast': 'gt_pool_last',
+    'tukey128_ll':    'lead_lag',
+    'tukey128_rp':    'reduced_pen',
+    'tukey128_ll_rp': 'lead_lag_rp',
     'tukey128_s7':    'stride7',
 }
 
@@ -140,7 +163,8 @@ METHOD_MARKER = {
 # across both files — 'noise' has no data here (win64_lsn0.1 isn't part of
 # this file's window set) but is kept as a placeholder to preserve alignment.
 ADJUSTMENT_ORDER = ['none', 'no_lv1', 'lead_lag', 'reduced_pen', 'lead_lag_rp',
-                    'norm_leadlag', 'noise', 'lag', 'stride7']
+                    'norm_leadlag', 'noise', 'lag', 'stride7',
+                    'depth1', 'global_time', 'pool_last', 'gt_pool_last']
 ADJUSTMENT_LABEL = {
     'none':         'none',
     'no_lv1':       'no lv1',
@@ -151,9 +175,13 @@ ADJUSTMENT_LABEL = {
     'noise':        'noise',
     'lag':          'lag',
     'stride7':      'stride 7',
+    'depth1':       'depth 1',
+    'global_time':  'global time',
+    'pool_last':    'pool: last',
+    'gt_pool_last': 'global time + pool: last',
 }
-_tab10 = matplotlib.colormaps['tab10'].colors
-ADJUSTMENT_COLOR = {adj: _tab10[i % len(_tab10)] for i, adj in enumerate(ADJUSTMENT_ORDER)}
+_adj_palette = matplotlib.colormaps['tab20'].colors
+ADJUSTMENT_COLOR = {adj: _adj_palette[i % len(_adj_palette)] for i, adj in enumerate(ADJUSTMENT_ORDER)}
 
 # channel_adapt: overlay drawn on top of the base (method, adjustment) marker, so the
 # channel-adapt family still reads as "the same win64 point, with a mark on it".
@@ -207,7 +235,9 @@ MARKER_SIZE     = 6.0
 
 # win64, win128, tukey128 (+ the channel-adapt win64_norm_ll combo) have bilinear data.
 _BIL_WIN_SET = {'win64', 'win64_sl1', 'win64_ll', 'win64_rp', 'win64_ll_rp',
-                'win64_norm_ll', 'norm_win64', 'win128', 'tukey128'}
+                'win64_norm_ll', 'norm_win64', 'win128', 'tukey128', 'tukey128_d1',
+                'tukey128_gt', 'tukey128_plast', 'tukey128_gt_plast',
+                'tukey128_ll', 'tukey128_rp', 'tukey128_ll_rp'}
 
 
 def _model_types_for_window(win):
@@ -320,6 +350,12 @@ def parse_finetune_row(name: str, expected_pretrain: str = None):
         if not pt or pt.group(1) != expected_pretrain:
             return None
 
+    # The dx+xf baseline was swept at ep2 (the comparable, many-seed set); the
+    # sparse ep200 dx+xf reruns are one-off and not part of that comparison.
+    m_ep = re.search(r'v2dx_v3xf_ep(\d+)_', name)
+    if m_ep and m_ep.group(1) != '2':
+        return None
+
     is_bilinear = '_ilbilinear_' in name
     # Check mlp_logsig before plast (plast is transformer-only)
     if '_mlp_logsig_' in name:
@@ -357,6 +393,14 @@ def parse_finetune_row(name: str, expected_pretrain: str = None):
             if f'_{w}_' in name or f'_{w}.' in name:
                 window = w
                 break
+        # logsig_global_time / logsig_pool ablation (mechanistic depth/gt/pool sweep)
+        if '_gt_' in name:
+            window = window + '_gt'
+        if '_plast' in name:
+            window = window + '_plast'
+        depth_m = re.search(r'_d(\d+)_', name)
+        if depth_m:
+            window = window + f'_d{depth_m.group(1)}'
         if '_sl1' in name:
             window = window + '_sl1'
         if has_lead_lag:

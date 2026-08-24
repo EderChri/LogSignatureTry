@@ -1,0 +1,554 @@
+{
+  "_comment": "Mechanistic ablations for the 'why does logsig help/hurt' question, on top of the existing 2-view mlp_logsig+bilinear/tukey128/none-adjustment/channel_adapt=none baseline (the comparison analysed in the baseline-vs-logsig table). All blocks use epochs_pretrain=2/epochs_finetune=10 (cheap, matches every existing seed-paired comparison) and reuse the SAME seed range as the existing dx+xf baseline per dataset, so every new run is seed-paired against data that already exists \u2014 no new pairing gaps. Three factors, three separate single-factor blocks (not fully crossed, per 'cheap and sharp'): (A) logsig_depth=1 vs the existing depth=2 (does order/Levy-area information matter at all, or is displacement enough \u2014 the decisive test flagged as missing: depth=1 has never been run on any dataset); (B) logsig_global_time x logsig_pool (does breaking reparametrization invariance help, and does it survive the default mean-pooling \u2014 see structural note below); (C) logsig_lead_lag on/off, extended from the existing Opportunity/USC_HAD-only, n=5 comparison to all 8 dataset pairs at full seed depth so the cross-dataset sign-test/Wilcoxon has real power. A final small block backfills USC_HAD's dx+xf baseline to seeds 0-4 (it currently only has 5-9), the one recurring seed-pool gap that's limited every paired analysis on that dataset so far. Existing depth=2/gt=False/pool=auto/lead_lag=0 cells are included in each grid for completeness but will be skipped automatically (output file already exists) \u2014 no wasted compute. Run with: python scripts/run_experiments.py experiment_configs/experiments_pre_probai.json --gpus 6,7,8",
+  "_structural_note_logsig_global_time": "Checked before designing this: logsig_global_time is correctly wired (num_feature_v2 accounts for the +1 channel via get_view_num_features, the cache key includes gt, normalize_logsig_levels z-scores it separately from the signature levels) \u2014 no bug. But there IS a real structural gap: for window/window_smooth modes the appended value is deterministic given (window index, total length) alone \u2014 it does not depend on the input signal X at all, so it cannot directly distinguish samples; whatever value it can add must come from modulating the cross-view interaction layer's per-timestep attention BEFORE pooling. With the current default logsig_pool='auto', which resolves to mean-pooling for every encoder/mode combo used here (mlp_logsig + window_smooth is never the 'stream' case auto-reserves last-token pooling for), any such per-timestep modulation gets averaged across all windows before reaching the classifier, which will wash out most of a purely position-keyed effect. In 'stream' mode specifically it's additionally just redundant: the signature's own prepended time channel already equals global time there, so global_time adds no new information in that mode by construction. Net: testing gt=True with pool=auto alone is close to a no-op by construction; pairing it with logsig_pool=last (so the final window's position value survives into the pooled vector) is the version of this ablation that can actually show something, hence the 2x2 grid below rather than a single on/off toggle.",
+  "experiments": [
+    {
+      "name": "Depth ablation (logsig_depth=1, the missing decisive level) \u2014 capture24 pretrain",
+      "enabled": true,
+      "pretrain": {
+        "data_name": "_DA_capture24_256_00",
+        "num_feature": 3,
+        "num_target": 1
+      },
+      "finetune_targets": [
+        {
+          "data_name": "_DA_WISDM_256_00",
+          "num_feature": 3,
+          "num_target": 6
+        },
+        {
+          "data_name": "_DA_WISDM2_256_00",
+          "num_feature": 3,
+          "num_target": 6
+        },
+        {
+          "data_name": "_DA_HAR70plus_256_00",
+          "num_feature": 6,
+          "num_target": 7
+        },
+        {
+          "data_name": "_DA_USC_HAD_256_00",
+          "num_feature": 6,
+          "num_target": 12
+        },
+        {
+          "data_name": "_DA_Opportunity_256_00",
+          "num_feature": 32,
+          "num_target": 18,
+          "pca_components": 32
+        },
+        {
+          "data_name": "_DA_Skoda_256_00",
+          "num_feature": 4,
+          "num_target": 11,
+          "pca_components": 4
+        }
+      ],
+      "fixed": {
+        "view2": "logsig",
+        "encoder_type": "mlp_logsig",
+        "logsig_mode": "window_smooth",
+        "logsig_smoothing": "tukey",
+        "logsig_window_size": 128,
+        "interaction_type": "bilinear",
+        "epochs_pretrain": 2,
+        "epochs_finetune": 10,
+        "batch_size_pretrain": 128,
+        "run_modes": "finetune"
+      },
+      "grid": {
+        "logsig_depth": [
+          1
+        ],
+        "seed": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9
+        ]
+      }
+    },
+    {
+      "name": "Depth ablation (logsig_depth=1) \u2014 SleepEEG pretrain",
+      "enabled": true,
+      "pretrain": {
+        "data_name": "_DA_SleepEEG_256_00",
+        "num_feature": 1,
+        "num_target": 5
+      },
+      "finetune_targets": [
+        {
+          "data_name": "_DA_Epilepsy_256_00",
+          "num_feature": 1,
+          "num_target": 2
+        }
+      ],
+      "fixed": {
+        "view2": "logsig",
+        "encoder_type": "mlp_logsig",
+        "logsig_mode": "window_smooth",
+        "logsig_smoothing": "tukey",
+        "logsig_window_size": 128,
+        "interaction_type": "bilinear",
+        "epochs_pretrain": 2,
+        "epochs_finetune": 10,
+        "batch_size_pretrain": 128,
+        "run_modes": "finetune"
+      },
+      "grid": {
+        "logsig_depth": [
+          1
+        ],
+        "seed": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9
+        ]
+      }
+    },
+    {
+      "name": "Depth ablation (logsig_depth=1) \u2014 HARTH pretrain",
+      "enabled": true,
+      "pretrain": {
+        "data_name": "_DA_HARTH_256_00",
+        "num_feature": 6,
+        "num_target": 12
+      },
+      "finetune_targets": [
+        {
+          "data_name": "_DA_HAR70plus_256_00",
+          "num_feature": 6,
+          "num_target": 7
+        }
+      ],
+      "fixed": {
+        "view2": "logsig",
+        "encoder_type": "mlp_logsig",
+        "logsig_mode": "window_smooth",
+        "logsig_smoothing": "tukey",
+        "logsig_window_size": 128,
+        "interaction_type": "bilinear",
+        "epochs_pretrain": 2,
+        "epochs_finetune": 10,
+        "batch_size_pretrain": 128,
+        "run_modes": "finetune",
+        "full_training": true
+      },
+      "grid": {
+        "logsig_depth": [
+          1
+        ],
+        "seed": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9
+        ]
+      }
+    },
+    {
+      "name": "Global-time x pooling ablation (2x2, see _structural_note_logsig_global_time) \u2014 capture24 pretrain",
+      "enabled": true,
+      "pretrain": {
+        "data_name": "_DA_capture24_256_00",
+        "num_feature": 3,
+        "num_target": 1
+      },
+      "finetune_targets": [
+        {
+          "data_name": "_DA_WISDM_256_00",
+          "num_feature": 3,
+          "num_target": 6
+        },
+        {
+          "data_name": "_DA_WISDM2_256_00",
+          "num_feature": 3,
+          "num_target": 6
+        },
+        {
+          "data_name": "_DA_HAR70plus_256_00",
+          "num_feature": 6,
+          "num_target": 7
+        },
+        {
+          "data_name": "_DA_USC_HAD_256_00",
+          "num_feature": 6,
+          "num_target": 12
+        },
+        {
+          "data_name": "_DA_Opportunity_256_00",
+          "num_feature": 32,
+          "num_target": 18,
+          "pca_components": 32
+        },
+        {
+          "data_name": "_DA_Skoda_256_00",
+          "num_feature": 4,
+          "num_target": 11,
+          "pca_components": 4
+        }
+      ],
+      "fixed": {
+        "view2": "logsig",
+        "encoder_type": "mlp_logsig",
+        "logsig_depth": 2,
+        "logsig_mode": "window_smooth",
+        "logsig_smoothing": "tukey",
+        "logsig_window_size": 128,
+        "interaction_type": "bilinear",
+        "epochs_pretrain": 2,
+        "epochs_finetune": 10,
+        "batch_size_pretrain": 128,
+        "run_modes": "finetune"
+      },
+      "grid": {
+        "logsig_global_time": [
+          false,
+          true
+        ],
+        "logsig_pool": [
+          "auto",
+          "last"
+        ],
+        "seed": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9
+        ]
+      }
+    },
+    {
+      "name": "Global-time x pooling ablation (2x2) \u2014 SleepEEG pretrain",
+      "enabled": true,
+      "pretrain": {
+        "data_name": "_DA_SleepEEG_256_00",
+        "num_feature": 1,
+        "num_target": 5
+      },
+      "finetune_targets": [
+        {
+          "data_name": "_DA_Epilepsy_256_00",
+          "num_feature": 1,
+          "num_target": 2
+        }
+      ],
+      "fixed": {
+        "view2": "logsig",
+        "encoder_type": "mlp_logsig",
+        "logsig_depth": 2,
+        "logsig_mode": "window_smooth",
+        "logsig_smoothing": "tukey",
+        "logsig_window_size": 128,
+        "interaction_type": "bilinear",
+        "epochs_pretrain": 2,
+        "epochs_finetune": 10,
+        "batch_size_pretrain": 128,
+        "run_modes": "finetune"
+      },
+      "grid": {
+        "logsig_global_time": [
+          false,
+          true
+        ],
+        "logsig_pool": [
+          "auto",
+          "last"
+        ],
+        "seed": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9
+        ]
+      }
+    },
+    {
+      "name": "Global-time x pooling ablation (2x2) \u2014 HARTH pretrain",
+      "enabled": true,
+      "pretrain": {
+        "data_name": "_DA_HARTH_256_00",
+        "num_feature": 6,
+        "num_target": 12
+      },
+      "finetune_targets": [
+        {
+          "data_name": "_DA_HAR70plus_256_00",
+          "num_feature": 6,
+          "num_target": 7
+        }
+      ],
+      "fixed": {
+        "view2": "logsig",
+        "encoder_type": "mlp_logsig",
+        "logsig_depth": 2,
+        "logsig_mode": "window_smooth",
+        "logsig_smoothing": "tukey",
+        "logsig_window_size": 128,
+        "interaction_type": "bilinear",
+        "epochs_pretrain": 2,
+        "epochs_finetune": 10,
+        "batch_size_pretrain": 128,
+        "run_modes": "finetune",
+        "full_training": true
+      },
+      "grid": {
+        "logsig_global_time": [
+          false,
+          true
+        ],
+        "logsig_pool": [
+          "auto",
+          "last"
+        ],
+        "seed": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9
+        ]
+      }
+    },
+    {
+      "name": "Lead-lag on/off, extended to full seed depth across all datasets \u2014 capture24 pretrain",
+      "enabled": true,
+      "pretrain": {
+        "data_name": "_DA_capture24_256_00",
+        "num_feature": 3,
+        "num_target": 1
+      },
+      "finetune_targets": [
+        {
+          "data_name": "_DA_WISDM_256_00",
+          "num_feature": 3,
+          "num_target": 6
+        },
+        {
+          "data_name": "_DA_WISDM2_256_00",
+          "num_feature": 3,
+          "num_target": 6
+        },
+        {
+          "data_name": "_DA_HAR70plus_256_00",
+          "num_feature": 6,
+          "num_target": 7
+        },
+        {
+          "data_name": "_DA_USC_HAD_256_00",
+          "num_feature": 6,
+          "num_target": 12
+        },
+        {
+          "data_name": "_DA_Opportunity_256_00",
+          "num_feature": 32,
+          "num_target": 18,
+          "pca_components": 32
+        },
+        {
+          "data_name": "_DA_Skoda_256_00",
+          "num_feature": 4,
+          "num_target": 11,
+          "pca_components": 4
+        }
+      ],
+      "fixed": {
+        "view2": "logsig",
+        "encoder_type": "mlp_logsig",
+        "logsig_depth": 2,
+        "logsig_mode": "window_smooth",
+        "logsig_smoothing": "tukey",
+        "logsig_window_size": 128,
+        "interaction_type": "bilinear",
+        "epochs_pretrain": 2,
+        "epochs_finetune": 10,
+        "batch_size_pretrain": 128,
+        "run_modes": "finetune"
+      },
+      "grid": {
+        "logsig_lead_lag": [
+          0,
+          16
+        ],
+        "seed": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9
+        ]
+      }
+    },
+    {
+      "name": "Lead-lag on/off \u2014 SleepEEG pretrain",
+      "enabled": true,
+      "pretrain": {
+        "data_name": "_DA_SleepEEG_256_00",
+        "num_feature": 1,
+        "num_target": 5
+      },
+      "finetune_targets": [
+        {
+          "data_name": "_DA_Epilepsy_256_00",
+          "num_feature": 1,
+          "num_target": 2
+        }
+      ],
+      "fixed": {
+        "view2": "logsig",
+        "encoder_type": "mlp_logsig",
+        "logsig_depth": 2,
+        "logsig_mode": "window_smooth",
+        "logsig_smoothing": "tukey",
+        "logsig_window_size": 128,
+        "interaction_type": "bilinear",
+        "epochs_pretrain": 2,
+        "epochs_finetune": 10,
+        "batch_size_pretrain": 128,
+        "run_modes": "finetune"
+      },
+      "grid": {
+        "logsig_lead_lag": [
+          0,
+          16
+        ],
+        "seed": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9
+        ]
+      }
+    },
+    {
+      "name": "Lead-lag on/off \u2014 HARTH pretrain",
+      "enabled": true,
+      "pretrain": {
+        "data_name": "_DA_HARTH_256_00",
+        "num_feature": 6,
+        "num_target": 12
+      },
+      "finetune_targets": [
+        {
+          "data_name": "_DA_HAR70plus_256_00",
+          "num_feature": 6,
+          "num_target": 7
+        }
+      ],
+      "fixed": {
+        "view2": "logsig",
+        "encoder_type": "mlp_logsig",
+        "logsig_depth": 2,
+        "logsig_mode": "window_smooth",
+        "logsig_smoothing": "tukey",
+        "logsig_window_size": 128,
+        "interaction_type": "bilinear",
+        "epochs_pretrain": 2,
+        "epochs_finetune": 10,
+        "batch_size_pretrain": 128,
+        "run_modes": "finetune",
+        "full_training": true
+      },
+      "grid": {
+        "logsig_lead_lag": [
+          0,
+          16
+        ],
+        "seed": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9
+        ]
+      }
+    },
+    {
+      "name": "Infra fill-in: USC_HAD dx+xf baseline seeds 0-4 (currently only has 5-9; every paired analysis on USC_HAD so far has been limited by this gap)",
+      "enabled": true,
+      "pretrain": {
+        "data_name": "_DA_capture24_256_00",
+        "num_feature": 3,
+        "num_target": 1
+      },
+      "finetune_targets": [
+        {
+          "data_name": "_DA_USC_HAD_256_00",
+          "num_feature": 6,
+          "num_target": 12
+        }
+      ],
+      "fixed": {
+        "view2": "dx",
+        "view3": "xf",
+        "encoder_type": "transformer",
+        "interaction_type": "attention",
+        "epochs_pretrain": 2,
+        "epochs_finetune": 10,
+        "batch_size_pretrain": 128,
+        "run_modes": "finetune"
+      },
+      "grid": {
+        "seed": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ]
+      }
+    }
+  ]
+}

@@ -1,10 +1,16 @@
-"""stationarity_report.py — quick ADF/KPSS stationarity check across all HAR datasets.
+"""stationarity_report.py — quick ADF/KPSS stationarity check across all datasets.
 
 Loads X_train directly from preprocessed_data/*.pkl (already windowed to
 [N, C, L], consistent across datasets) and runs ADF + KPSS on a random subsample
 of windows per channel. Prints a per-dataset summary (mean rejection fraction
 across channels) and writes a per-channel detail table to
 plots/stationarity_report.tsv.
+
+Before either test is applied to a window, it must pass three assumption
+checks (see `check_window`): finite values only, non-degenerate variance
+(ADF/KPSS are undefined on a constant series), and a minimum length relative
+to the lag order. Windows that fail are excluded from the reported fractions
+and counted separately per failure reason.
 
 ADF: low p-value -> reject unit root -> window looks stationary.
 KPSS: low p-value -> reject stationarity -> window looks non-stationary.
@@ -26,8 +32,12 @@ import warnings
 import numpy as np
 from statsmodels.tsa.stattools import adfuller, kpss
 
-DATASETS = ['HARTH', 'HAR70plus', 'capture24', 'WISDM', 'WISDM2',
-            'USC_HAD', 'Opportunity', 'Skoda']
+DATASETS = ['SleepEEG', 'Epilepsy', 'ECG', 'HARTH', 'HAR70plus', 'capture24',
+            'WISDM', 'WISDM2', 'USC_HAD', 'Opportunity', 'Skoda']
+
+# Assumption thresholds applied to each window before ADF/KPSS.
+MIN_STD = 1e-8      # below this, a window is treated as numerically constant
+MIN_LENGTH = 20      # ADF uses maxlag=10, so need enough points beyond that
 
 # Verdict thresholds on the per-dataset mean ADF-stationary / KPSS-non-stationary
 # fractions. "Stationary" requires both tests to agree; "Non-stationary" requires
@@ -69,6 +79,25 @@ def kpss_pvalue(series: np.ndarray) -> float:
         return float('nan')
 
 
+def check_window(window: np.ndarray) -> str | None:
+    """Verify a window satisfies the assumptions ADF/KPSS need to be well-defined.
+
+    Returns None if all checks pass, otherwise a short failure reason:
+      'short'     — fewer than MIN_LENGTH points (undefined lag structure)
+      'nan_inf'   — contains NaN/Inf (breaks the underlying regression)
+      'constant'  — near-zero variance (unit-root/stationarity tests are
+                    meaningless on a degenerate series; both statsmodels
+                    routines error or return nonsense p-values here)
+    """
+    if window.size < MIN_LENGTH:
+        return 'short'
+    if not np.all(np.isfinite(window)):
+        return 'nan_inf'
+    if np.std(window) < MIN_STD:
+        return 'constant'
+    return None
+
+
 def load_train_windows(data_name: str) -> np.ndarray:
     """Load X_train [N, C, L] from preprocessed_data/_DA_{data_name}_256_00.pkl."""
     path = f'preprocessed_data/_DA_{data_name}_256_00.pkl'
@@ -77,18 +106,33 @@ def load_train_windows(data_name: str) -> np.ndarray:
     return np.asarray(X_train)
 
 
-def channel_stationarity(X_ch: np.ndarray, alpha: float = 0.05) -> tuple[float, float]:
-    """ADF/KPSS rejection fractions for one channel across sampled windows."""
-    adf_ps  = [adf_pvalue(X_ch[i])  for i in range(len(X_ch))]
-    kpss_ps = [kpss_pvalue(X_ch[i]) for i in range(len(X_ch))]
+def channel_stationarity(X_ch: np.ndarray, alpha: float = 0.05) -> tuple:
+    """ADF/KPSS rejection fractions for one channel across sampled windows.
+
+    Windows failing `check_window` are excluded from the fractions; their
+    failure reasons are tallied and returned alongside.
+    """
+    reasons = {'short': 0, 'nan_inf': 0, 'constant': 0}
+    adf_ps, kpss_ps = [], []
+    for i in range(len(X_ch)):
+        reason = check_window(X_ch[i])
+        if reason is not None:
+            reasons[reason] += 1
+            continue
+        adf_ps.append(adf_pvalue(X_ch[i]))
+        kpss_ps.append(kpss_pvalue(X_ch[i]))
+
+    n_valid = len(adf_ps)
+    if n_valid == 0:
+        return float('nan'), float('nan'), n_valid, reasons
     adf_frac  = float(np.nanmean(np.array(adf_ps)  < alpha))
     kpss_frac = float(np.nanmean(np.array(kpss_ps) < alpha))
-    return adf_frac, kpss_frac
+    return adf_frac, kpss_frac, n_valid, reasons
 
 
 def run(datasets: list, max_stat: int, seed: int, alpha: float):
     rng = np.random.default_rng(seed)
-    rows = []  # (dataset, channel, n_windows, adf_frac, kpss_frac)
+    rows = []  # (dataset, channel, n_sampled, n_valid, reasons, adf_frac, kpss_frac)
 
     for name in datasets:
         path = f'preprocessed_data/_DA_{name}_256_00.pkl'
@@ -106,8 +150,12 @@ def run(datasets: list, max_stat: int, seed: int, alpha: float):
               f'testing {n_sample} sampled windows …')
 
         for ch in range(n_ch):
-            adf_frac, kpss_frac = channel_stationarity(X_st[:, ch, :], alpha)
-            rows.append((name, ch, n_sample, adf_frac, kpss_frac))
+            adf_frac, kpss_frac, n_valid, reasons = channel_stationarity(X_st[:, ch, :], alpha)
+            rows.append((name, ch, n_sample, n_valid, reasons, adf_frac, kpss_frac))
+            n_failed = n_sample - n_valid
+            if n_failed:
+                detail = ', '.join(f'{k}={v}' for k, v in reasons.items() if v)
+                print(f'  ch {ch}: {n_failed}/{n_sample} windows failed assumption checks ({detail})')
 
     if not rows:
         print('No datasets processed.')
@@ -116,13 +164,19 @@ def run(datasets: list, max_stat: int, seed: int, alpha: float):
     os.makedirs('plots', exist_ok=True)
     out_tsv = 'plots/stationarity_report.tsv'
     with open(out_tsv, 'w') as f:
-        f.write('dataset\tchannel\tn_windows\tadf_stationary_frac\tkpss_nonstationary_frac\n')
-        for name, ch, n, adf_frac, kpss_frac in rows:
-            f.write(f'{name}\t{ch}\t{n}\t{adf_frac:.4f}\t{kpss_frac:.4f}\n')
+        f.write('dataset\tchannel\tn_sampled\tn_valid\tn_failed_short\tn_failed_nan_inf\t'
+                 'n_failed_constant\tadf_stationary_frac\tkpss_nonstationary_frac\n')
+        for name, ch, n_sampled, n_valid, reasons, adf_frac, kpss_frac in rows:
+            f.write(f'{name}\t{ch}\t{n_sampled}\t{n_valid}\t{reasons["short"]}\t'
+                     f'{reasons["nan_inf"]}\t{reasons["constant"]}\t{adf_frac:.4f}\t{kpss_frac:.4f}\n')
     print(f'\nPer-channel detail written to {out_tsv}')
 
     info_lines = [
-        'ADF stationary frac:      fraction of windows/channels where ADF rejects a unit root',
+        'Assumption checks (per window, before ADF/KPSS):',
+        f'  length >= {MIN_LENGTH}, all values finite, std >= {MIN_STD} (non-constant).',
+        '  Windows failing any check are excluded from the fractions below.',
+        '',
+        'ADF stationary frac:      fraction of valid windows/channels where ADF rejects a unit root',
         '                          (higher -> more stationary).',
         'KPSS non-stationary frac: fraction where KPSS rejects stationarity',
         '                          (higher -> more non-stationary).',
@@ -137,16 +191,19 @@ def run(datasets: list, max_stat: int, seed: int, alpha: float):
         print('| ' + l.ljust(width - 1) + '|')
     print('+' + '-' * width + '+')
 
-    print(f'\n{"dataset":<14}{"channels":>9}{"adf_stationary":>16}'
+    print(f'\n{"dataset":<14}{"channels":>9}{"failed_frac":>13}{"adf_stationary":>16}'
           f'{"kpss_nonstationary":>20}{"verdict":>16}')
     for name in datasets:
         ds_rows = [r for r in rows if r[0] == name]
         if not ds_rows:
             continue
-        adf_mean  = np.mean([r[3] for r in ds_rows])
-        kpss_mean = np.mean([r[4] for r in ds_rows])
+        n_sampled_total = sum(r[2] for r in ds_rows)
+        n_valid_total   = sum(r[3] for r in ds_rows)
+        failed_frac     = 1.0 - n_valid_total / n_sampled_total if n_sampled_total else float('nan')
+        adf_mean  = np.nanmean([r[5] for r in ds_rows])
+        kpss_mean = np.nanmean([r[6] for r in ds_rows])
         verdict   = classify(adf_mean, kpss_mean)
-        print(f'{name:<14}{len(ds_rows):>9}{adf_mean:>16.3f}'
+        print(f'{name:<14}{len(ds_rows):>9}{failed_frac:>13.3f}{adf_mean:>16.3f}'
               f'{kpss_mean:>20.3f}{verdict:>16}')
 
 

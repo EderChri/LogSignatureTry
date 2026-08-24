@@ -1,0 +1,221 @@
+{
+  "_comment": "dx+xf (transformer encoder, default attention interaction — no bilinear, no mlp_logsig) coverage for every pretrain->finetune pair in vis/visualize_dataset_pairs.py's DATASET_PAIRS. Scoped to what's actually missing rather than re-running everything: the 12 FD-*->FD-* hub-and-spoke directions already have 10-seed dx+xf baseline (random-init) runs from experiments_baselines.json, so those blocks add only the matching finetune (pretrained-weights) runs at the same ep2/10 budget so their (view, ep, config) key lines up with the existing baseline for the plot. SleepEEG->{FD-A,FD-B,FD-C,FD-D} and ECG->{Epilepsy,FD-A,FD-B,FD-C,FD-D} have no dx+xf data at all yet, so those blocks schedule both finetune and baseline. SleepEEG->EMG and ECG->EMG are intentionally omitted: no _DA_EMG_256_00 preprocessed data (or raw EMG/ source directory) exists in this checkout, so those pairs can't be run yet. encoder_type and interaction_type both omitted throughout (default transformer / attention). Run with: python scripts/run_experiments.py experiment_configs/experiments_dxxf_pairs_completion.json --gpus 6,7,8",
+  "_important_harth_har70plus": "HARTH<->HAR70plus use PAIR_METRIC='f1_subject_macro' in vis/visualize_dataset_pairs.py (not accuracy), which needs the subject_ids-aware get_clf_metrics() path in src/evaluation.py / scripts/run_finetune.py -- as of this writing that path is only an UNCOMMITTED working-tree change, never yet exercised by a completed run. Every existing dx+xf run for both directions (old archives AND the prior current-out_finetune baseline files for HAR70plus->HARTH) predates that code and has f1_subject_macro=None, so neither direction could show a point until BOTH modes are freshly run under the current code. The 10 stale HAR70plus->HARTH baseline files (and their final_test_metric_summary.tsv rows) have already been renamed in place with a '_pre_subject_wise_old' suffix -- kept for reference, but out of the way of both the run_finetune.py exists-check and vis/visualize_dataset_pairs.py's RUN_RE (which requires the run_name to end exactly in finetune/baseline/freeze) -- so their original run_names are free and both blocks below (run_modes=finetune,baseline) will execute cleanly without deleting anything. HARTH->HAR70plus had no current-out_finetune files at all to begin with (its dx+xf data only ever lived in the old archives).",
+  "experiments": [
+    {
+      "name": "HAR70plus->HARTH (dx+xf): finetune + baseline refresh (old baseline predated f1_subject_macro support, already renamed aside -- see _important_harth_har70plus)",
+      "enabled": true,
+      "pretrain": {
+        "data_name": "_DA_HAR70plus_256_00",
+        "num_feature": 6,
+        "num_target": 7
+      },
+      "finetune_targets": [
+        {
+          "data_name": "_DA_HARTH_256_00",
+          "num_feature": 6,
+          "num_target": 12
+        }
+      ],
+      "fixed": {
+        "view2": "dx",
+        "view3": "xf",
+        "channel_adapt": "none",
+        "epochs_pretrain": 2,
+        "epochs_finetune": 10,
+        "batch_size_pretrain": 128,
+        "run_modes": "finetune,baseline"
+      },
+      "grid": {
+        "seed": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+      }
+    },
+    {
+      "name": "HARTH->HAR70plus (dx+xf): finetune + baseline (existing archived data predates f1_subject_macro support; no current-out_finetune files to conflict with, runs clean)",
+      "enabled": true,
+      "pretrain": {
+        "data_name": "_DA_HARTH_256_00",
+        "num_feature": 6,
+        "num_target": 12
+      },
+      "finetune_targets": [
+        {
+          "data_name": "_DA_HAR70plus_256_00",
+          "num_feature": 6,
+          "num_target": 7
+        }
+      ],
+      "fixed": {
+        "view2": "dx",
+        "view3": "xf",
+        "channel_adapt": "none",
+        "epochs_pretrain": 2,
+        "epochs_finetune": 10,
+        "batch_size_pretrain": 128,
+        "run_modes": "finetune,baseline"
+      },
+      "grid": {
+        "seed": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+      }
+    },
+    {
+      "name": "FD-A->{FD-B,FD-C,FD-D} (dx+xf): finetune completion (baseline already exists in experiments_baselines.json)",
+      "enabled": true,
+      "pretrain": {
+        "data_name": "_DA_FD-A-256_256_00",
+        "num_feature": 1,
+        "num_target": 3
+      },
+      "finetune_targets": [
+        {"data_name": "_DA_FD-B-256_256_00", "num_feature": 1, "num_target": 3},
+        {"data_name": "_DA_FD-C-256_256_00", "num_feature": 1, "num_target": 3},
+        {"data_name": "_DA_FD-D-256_256_00", "num_feature": 1, "num_target": 3}
+      ],
+      "fixed": {
+        "view2": "dx",
+        "view3": "xf",
+        "channel_adapt": "none",
+        "epochs_pretrain": 2,
+        "epochs_finetune": 10,
+        "batch_size_pretrain": 128,
+        "run_modes": "finetune"
+      },
+      "grid": {
+        "seed": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+      }
+    },
+    {
+      "name": "FD-B->{FD-A,FD-C,FD-D} (dx+xf): finetune completion (baseline already exists in experiments_baselines.json)",
+      "enabled": true,
+      "pretrain": {
+        "data_name": "_DA_FD-B-256_256_00",
+        "num_feature": 1,
+        "num_target": 3
+      },
+      "finetune_targets": [
+        {"data_name": "_DA_FD-A-256_256_00", "num_feature": 1, "num_target": 3},
+        {"data_name": "_DA_FD-C-256_256_00", "num_feature": 1, "num_target": 3},
+        {"data_name": "_DA_FD-D-256_256_00", "num_feature": 1, "num_target": 3}
+      ],
+      "fixed": {
+        "view2": "dx",
+        "view3": "xf",
+        "channel_adapt": "none",
+        "epochs_pretrain": 2,
+        "epochs_finetune": 10,
+        "batch_size_pretrain": 128,
+        "run_modes": "finetune"
+      },
+      "grid": {
+        "seed": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+      }
+    },
+    {
+      "name": "FD-C->{FD-A,FD-B,FD-D} (dx+xf): finetune completion (baseline already exists in experiments_baselines.json)",
+      "enabled": true,
+      "pretrain": {
+        "data_name": "_DA_FD-C-256_256_00",
+        "num_feature": 1,
+        "num_target": 3
+      },
+      "finetune_targets": [
+        {"data_name": "_DA_FD-A-256_256_00", "num_feature": 1, "num_target": 3},
+        {"data_name": "_DA_FD-B-256_256_00", "num_feature": 1, "num_target": 3},
+        {"data_name": "_DA_FD-D-256_256_00", "num_feature": 1, "num_target": 3}
+      ],
+      "fixed": {
+        "view2": "dx",
+        "view3": "xf",
+        "channel_adapt": "none",
+        "epochs_pretrain": 2,
+        "epochs_finetune": 10,
+        "batch_size_pretrain": 128,
+        "run_modes": "finetune"
+      },
+      "grid": {
+        "seed": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+      }
+    },
+    {
+      "name": "FD-D->{FD-A,FD-B,FD-C} (dx+xf): finetune completion (baseline already exists in experiments_baselines.json)",
+      "enabled": true,
+      "pretrain": {
+        "data_name": "_DA_FD-D-256_256_00",
+        "num_feature": 1,
+        "num_target": 3
+      },
+      "finetune_targets": [
+        {"data_name": "_DA_FD-A-256_256_00", "num_feature": 1, "num_target": 3},
+        {"data_name": "_DA_FD-B-256_256_00", "num_feature": 1, "num_target": 3},
+        {"data_name": "_DA_FD-C-256_256_00", "num_feature": 1, "num_target": 3}
+      ],
+      "fixed": {
+        "view2": "dx",
+        "view3": "xf",
+        "channel_adapt": "none",
+        "epochs_pretrain": 2,
+        "epochs_finetune": 10,
+        "batch_size_pretrain": 128,
+        "run_modes": "finetune"
+      },
+      "grid": {
+        "seed": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+      }
+    },
+    {
+      "name": "SleepEEG->{FD-A,FD-B,FD-C,FD-D} (dx+xf): new pair, finetune + baseline (no prior data)",
+      "enabled": true,
+      "pretrain": {
+        "data_name": "_DA_SleepEEG_256_00",
+        "num_feature": 1,
+        "num_target": 5
+      },
+      "finetune_targets": [
+        {"data_name": "_DA_FD-A-256_256_00", "num_feature": 1, "num_target": 3},
+        {"data_name": "_DA_FD-B-256_256_00", "num_feature": 1, "num_target": 3},
+        {"data_name": "_DA_FD-C-256_256_00", "num_feature": 1, "num_target": 3},
+        {"data_name": "_DA_FD-D-256_256_00", "num_feature": 1, "num_target": 3}
+      ],
+      "fixed": {
+        "view2": "dx",
+        "view3": "xf",
+        "channel_adapt": "none",
+        "epochs_pretrain": 2,
+        "epochs_finetune": 10,
+        "batch_size_pretrain": 128,
+        "run_modes": "finetune,baseline"
+      },
+      "grid": {
+        "seed": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+      }
+    },
+    {
+      "name": "ECG->{Epilepsy,FD-A,FD-B,FD-C,FD-D} (dx+xf): new pair, finetune + baseline (no prior data)",
+      "enabled": true,
+      "pretrain": {
+        "data_name": "_DA_ECG_256_00",
+        "num_feature": 1,
+        "num_target": 4
+      },
+      "finetune_targets": [
+        {"data_name": "_DA_Epilepsy_256_00", "num_feature": 1, "num_target": 2},
+        {"data_name": "_DA_FD-A-256_256_00", "num_feature": 1, "num_target": 3},
+        {"data_name": "_DA_FD-B-256_256_00", "num_feature": 1, "num_target": 3},
+        {"data_name": "_DA_FD-C-256_256_00", "num_feature": 1, "num_target": 3},
+        {"data_name": "_DA_FD-D-256_256_00", "num_feature": 1, "num_target": 3}
+      ],
+      "fixed": {
+        "view2": "dx",
+        "view3": "xf",
+        "channel_adapt": "none",
+        "epochs_pretrain": 2,
+        "epochs_finetune": 10,
+        "batch_size_pretrain": 128,
+        "run_modes": "finetune,baseline"
+      },
+      "grid": {
+        "seed": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+      }
+    }
+  ]
+}

@@ -1,0 +1,185 @@
+{
+  "_comment": "Baseline-only runs: dx+xf view config (the non-logsig comparison model, 'F-style' elsewhere in this repo) with run_modes=baseline (random-init classifier, no pretrained weights loaded — isolates how much pretraining/domain-transfer itself is worth). Covers HAR70plus→HARTH (mirrors experiments_har70plus_harth.json) and the FD-A/B/C/D hub-and-spoke cross-domain pairs (mirrors experiments_fd_crossdomain.json). Requires the run_finetune.py fix that makes 'finetune' honor --run_modes exclusion (previously it always ran regardless of run_modes) — without that fix, run_modes=baseline would still also execute a full finetune run whenever a pretrain checkpoint exists. Cheap epoch budget (epochs_pretrain=2, epochs_finetune=10): the pretrain step still runs (run_experiments.py always pairs pretrain+finetune, and baseline mode never reads that checkpoint), but at 2 epochs it costs ~10-20s per seed and is effectively free — do not raise epochs_pretrain here without first adding a way to skip the pretrain step, or GPU time gets spent on a checkpoint nothing reads. encoder_type omitted (defaults to transformer) and interaction_type omitted (defaults to attention), matching the existing dx+xf 'F-style' baseline blocks' convention of not overriding these for the non-logsig model. Run with: python scripts/run_experiments.py experiment_configs/experiments_baselines.json --gpus 6,7,8",
+  "experiments": [
+    {
+      "name": "HAR70plus→HARTH (dx+xf): baseline only (random init, no pretrained weights)",
+      "enabled": true,
+      "pretrain": {
+        "data_name": "_DA_HAR70plus_256_00",
+        "num_feature": 6,
+        "num_target": 7
+      },
+      "finetune_targets": [
+        {
+          "data_name": "_DA_HARTH_256_00",
+          "num_feature": 6,
+          "num_target": 12
+        }
+      ],
+      "fixed": {
+        "view2": "dx",
+        "view3": "xf",
+        "channel_adapt": "none",
+        "epochs_pretrain": 2,
+        "epochs_finetune": 10,
+        "batch_size_pretrain": 128,
+        "run_modes": "baseline"
+      },
+      "grid": {
+        "seed": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+      }
+    },
+    {
+      "name": "FD-A→{FD-B,FD-C,FD-D} (dx+xf): baseline only (random init, no pretrained weights)",
+      "enabled": true,
+      "pretrain": {
+        "data_name": "_DA_FD-A-256_256_00",
+        "num_feature": 1,
+        "num_target": 3
+      },
+      "finetune_targets": [
+        {
+          "data_name": "_DA_FD-B-256_256_00",
+          "num_feature": 1,
+          "num_target": 3
+        },
+        {
+          "data_name": "_DA_FD-C-256_256_00",
+          "num_feature": 1,
+          "num_target": 3
+        },
+        {
+          "data_name": "_DA_FD-D-256_256_00",
+          "num_feature": 1,
+          "num_target": 3
+        }
+      ],
+      "fixed": {
+        "view2": "dx",
+        "view3": "xf",
+        "channel_adapt": "none",
+        "epochs_pretrain": 2,
+        "epochs_finetune": 10,
+        "batch_size_pretrain": 128,
+        "run_modes": "baseline"
+      },
+      "grid": {
+        "seed": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+      }
+    },
+    {
+      "name": "FD-B→{FD-A,FD-C,FD-D} (dx+xf): baseline only (random init, no pretrained weights)",
+      "enabled": true,
+      "pretrain": {
+        "data_name": "_DA_FD-B-256_256_00",
+        "num_feature": 1,
+        "num_target": 3
+      },
+      "finetune_targets": [
+        {
+          "data_name": "_DA_FD-A-256_256_00",
+          "num_feature": 1,
+          "num_target": 3
+        },
+        {
+          "data_name": "_DA_FD-C-256_256_00",
+          "num_feature": 1,
+          "num_target": 3
+        },
+        {
+          "data_name": "_DA_FD-D-256_256_00",
+          "num_feature": 1,
+          "num_target": 3
+        }
+      ],
+      "fixed": {
+        "view2": "dx",
+        "view3": "xf",
+        "channel_adapt": "none",
+        "epochs_pretrain": 2,
+        "epochs_finetune": 10,
+        "batch_size_pretrain": 128,
+        "run_modes": "baseline"
+      },
+      "grid": {
+        "seed": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+      }
+    },
+    {
+      "name": "FD-C→{FD-A,FD-B,FD-D} (dx+xf): baseline only (random init, no pretrained weights)",
+      "enabled": true,
+      "pretrain": {
+        "data_name": "_DA_FD-C-256_256_00",
+        "num_feature": 1,
+        "num_target": 3
+      },
+      "finetune_targets": [
+        {
+          "data_name": "_DA_FD-A-256_256_00",
+          "num_feature": 1,
+          "num_target": 3
+        },
+        {
+          "data_name": "_DA_FD-B-256_256_00",
+          "num_feature": 1,
+          "num_target": 3
+        },
+        {
+          "data_name": "_DA_FD-D-256_256_00",
+          "num_feature": 1,
+          "num_target": 3
+        }
+      ],
+      "fixed": {
+        "view2": "dx",
+        "view3": "xf",
+        "channel_adapt": "none",
+        "epochs_pretrain": 2,
+        "epochs_finetune": 10,
+        "batch_size_pretrain": 128,
+        "run_modes": "baseline"
+      },
+      "grid": {
+        "seed": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+      }
+    },
+    {
+      "name": "FD-D→{FD-A,FD-B,FD-C} (dx+xf): baseline only (random init, no pretrained weights)",
+      "enabled": true,
+      "pretrain": {
+        "data_name": "_DA_FD-D-256_256_00",
+        "num_feature": 1,
+        "num_target": 3
+      },
+      "finetune_targets": [
+        {
+          "data_name": "_DA_FD-A-256_256_00",
+          "num_feature": 1,
+          "num_target": 3
+        },
+        {
+          "data_name": "_DA_FD-B-256_256_00",
+          "num_feature": 1,
+          "num_target": 3
+        },
+        {
+          "data_name": "_DA_FD-C-256_256_00",
+          "num_feature": 1,
+          "num_target": 3
+        }
+      ],
+      "fixed": {
+        "view2": "dx",
+        "view3": "xf",
+        "channel_adapt": "none",
+        "epochs_pretrain": 2,
+        "epochs_finetune": 10,
+        "batch_size_pretrain": 128,
+        "run_modes": "baseline"
+      },
+      "grid": {
+        "seed": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+      }
+    }
+  ]
+}

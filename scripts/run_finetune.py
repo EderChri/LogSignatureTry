@@ -78,6 +78,21 @@ y_te = torch.tensor(y_test)
 del X_tr_raw, X_va_raw, X_te_raw
 gc.collect()
 
+# Optional subject-id sidecar (currently only HARTH / HAR70plus), aligned
+# index-for-index with the test split above — see scripts/add_subject_ids.py.
+subject_ids_test = None
+_subjects_path = f'preprocessed_data/{args.data_name}_subjects.pkl'
+if os.path.exists(_subjects_path):
+    with open(_subjects_path, 'rb') as f:
+        _subj = pickle.load(f)
+    _cand = _subj.get('test')
+    if _cand is not None and len(_cand) == len(y_te):
+        subject_ids_test = _cand
+    else:
+        print(f'Warning: {_subjects_path} test-split length mismatch '
+              f'({None if _cand is None else len(_cand)} vs {len(y_te)}); '
+              f'skipping f1_subject_macro.', flush=True)
+
 # ── Feature-dimension bookkeeping ───────────────────────────────────────────
 _pca_k             = getattr(args, 'pca_components', None)
 _channel_adapt     = getattr(args, 'channel_adapt', 'none')
@@ -283,11 +298,13 @@ def _run_variant(mode_name: str, load_pretrained: bool):
 
         tr_m = get_clf_metrics(args, encoder, clf, train_loader, device)
         va_m = get_clf_metrics(args, encoder, clf, valid_loader, device)
-        te_m = get_clf_metrics(args, encoder, clf, test_loader,  device)
+        te_m = get_clf_metrics(args, encoder, clf, test_loader,  device,
+                               subject_ids=subject_ids_test)
+        _subj_str = f'  f1_subj={te_m["f1_subject_macro"]:.4f}' if te_m['f1_subject_macro'] is not None else ''
         print(f'[{mode_name}] Epoch {epoch}: '
               f'acc train={tr_m["accuracy"]:.4f}  '
               f'val={va_m["accuracy"]:.4f}  '
-              f'test={te_m["accuracy"]:.4f}', flush=True)
+              f'test={te_m["accuracy"]:.4f}{_subj_str}', flush=True)
         metric_list.append([tr_m, va_m, te_m])
         final_test_mm  = te_m[monitoring_metric]
         epochs_trained = epoch
@@ -317,7 +334,10 @@ def _run_variant(mode_name: str, load_pretrained: bool):
 
 
 # ── Run variants ──────────────────────────────────────────────────────────────
-_run_variant('finetune',  load_pretrained=True)
+if 'finetune' in _run_modes:
+    _run_variant('finetune',  load_pretrained=True)
+else:
+    print('Skipping finetune (not in --run_modes)')
 if 'freeze'   in _run_modes:
     _run_variant('freeze',   load_pretrained=True)
 else:
